@@ -1,14 +1,17 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Server, Package, Activity, ExternalLink, Cpu, MemoryStick, HardDrive } from 'lucide-react';
 import { useServers, useDeployments, useSystemStatus } from '../hooks/useApi';
 import ServerCard from '../components/ServerCard';
 import StatusBadge from '../components/StatusBadge';
 import { AggregatedMetricsChart } from '../components/MetricsChart';
+import { useMetricsStore } from '../stores/useMetricsStore';
 
 export default function Dashboard() {
   const { data: servers, isLoading: serversLoading } = useServers();
   const { data: deployments, isLoading: deploymentsLoading } = useDeployments();
   const { data: status } = useSystemStatus();
+  const addMetrics = useMetricsStore((state) => state.addMetrics);
 
   const runningDeployments = deployments?.filter((d) => d.status === 'running') || [];
   const appsWithWebUI = runningDeployments.filter((d) => {
@@ -19,6 +22,17 @@ export default function Dashboard() {
 
   const onlineServers = servers?.filter((s) => s.agentStatus === 'online') || [];
   const serverIds = onlineServers.map((s) => s.id);
+
+  // Seed metrics from server data on load
+  useEffect(() => {
+    if (servers) {
+      servers.forEach((server) => {
+        if (server.metrics && server.agentStatus === 'online') {
+          addMetrics(server.id, server.metrics);
+        }
+      });
+    }
+  }, [servers, addMetrics]);
 
   return (
     <div className="space-y-6 md:space-y-8">

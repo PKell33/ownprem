@@ -33,14 +33,14 @@ export default function MetricsChart({ serverId, height = 200, showLegend = true
   const gridColor = theme === 'dark' ? '#374151' : '#e5e7eb';
   const textColor = theme === 'dark' ? '#9ca3af' : '#6b7280';
 
-  if (data.length < 2) {
+  if (data.length === 0) {
     return (
       <div
         className="flex items-center justify-center text-sm"
         style={{ height }}
       >
         <span className="dark:text-gray-500 light:text-gray-400">
-          Collecting metrics data...
+          Waiting for metrics...
         </span>
       </div>
     );
@@ -145,14 +145,14 @@ export function SingleMetricChart({
   const gridColor = theme === 'dark' ? '#374151' : '#e5e7eb';
   const textColor = theme === 'dark' ? '#9ca3af' : '#6b7280';
 
-  if (data.length < 2) {
+  if (data.length === 0) {
     return (
       <div
         className="flex items-center justify-center text-xs"
         style={{ height }}
       >
         <span className="dark:text-gray-500 light:text-gray-400">
-          Collecting data...
+          Waiting for data...
         </span>
       </div>
     );
@@ -247,14 +247,14 @@ export function AggregatedMetricsChart({
   // Generate colors for each server
   const serverColors = ['#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
 
-  if (data.length < 2) {
+  if (data.length === 0) {
     return (
       <div
         className="flex items-center justify-center text-sm"
         style={{ height }}
       >
         <span className="dark:text-gray-500 light:text-gray-400">
-          Collecting metrics data...
+          Waiting for metrics...
         </span>
       </div>
     );
