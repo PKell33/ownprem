@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import serversRouter from './routes/servers.js';
 import appsRouter from './routes/apps.js';
+import deploymentsRouter from './routes/deployments.js';
+import servicesRouter from './routes/services.js';
 import systemRouter from './routes/system.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { optionalAuth } from './middleware/auth.js';
@@ -22,6 +24,8 @@ export function createApi(): express.Application {
   // API routes
   app.use('/api/servers', serversRouter);
   app.use('/api/apps', appsRouter);
+  app.use('/api/deployments', deploymentsRouter);
+  app.use('/api/services', servicesRouter);
   app.use('/api/system', systemRouter);
 
   // Error handling
