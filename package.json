@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n orch,agent -c blue,green \"npm run dev:orchestrator\" \"npm run dev:agent\"",
+    "dev": "concurrently -n orch,agent,ui -c blue,green,magenta \"npm run dev:orchestrator\" \"npm run dev:agent\" \"npm run dev:ui\"",
     "dev:orchestrator": "npm run dev -w apps/orchestrator",
     "dev:agent": "npm run dev -w apps/agent",
     "dev:ui": "npm run dev -w apps/ui",
