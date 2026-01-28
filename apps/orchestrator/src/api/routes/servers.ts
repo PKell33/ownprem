@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { randomBytes } from 'crypto';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
+import { validateBody, validateParams, schemas } from '../middleware/validate.js';
+import { hashToken } from '../../websocket/agentHandler.js';
 import type { Server, ServerMetrics } from '@nodefoundry/shared';
 
 const router = Router();
@@ -44,37 +46,32 @@ router.get('/', (_req, res) => {
 });
 
 // POST /api/servers - Add a new server
-router.post('/', (req, res) => {
+router.post('/', validateBody(schemas.servers.create), (req, res) => {
   const { name, host } = req.body;
-
-  if (!name || typeof name !== 'string') {
-    throw createError('Server name is required', 400, 'INVALID_NAME');
-  }
-
-  if (!host || typeof host !== 'string') {
-    throw createError('Server host is required', 400, 'INVALID_HOST');
-  }
-
   const db = getDb();
   const id = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-  const authToken = randomBytes(32).toString('hex');
+
+  // Generate and hash the auth token
+  const rawAuthToken = randomBytes(32).toString('hex');
+  const hashedAuthToken = hashToken(rawAuthToken);
 
   const existing = db.prepare('SELECT id FROM servers WHERE id = ? OR name = ?').get(id, name);
   if (existing) {
     throw createError('Server with this name already exists', 409, 'SERVER_EXISTS');
   }
 
+  // Store the hashed token in the database
   const stmt = db.prepare(`
     INSERT INTO servers (id, name, host, is_foundry, auth_token, agent_status)
     VALUES (?, ?, ?, FALSE, ?, 'offline')
   `);
-  stmt.run(id, name, host, authToken);
+  stmt.run(id, name, host, hashedAuthToken);
 
   const row = db.prepare('SELECT * FROM servers WHERE id = ?').get(id) as ServerRow;
   const server = rowToServer(row);
 
-  // Return bootstrap command for the new server
-  const bootstrapCommand = `curl -sSL http://${req.get('host')}/agent/install.sh | sudo bash -s -- --foundry http://${req.get('host')} --token ${authToken} --id ${id}`;
+  // Return bootstrap command for the new server (using raw token, not hashed)
+  const bootstrapCommand = `curl -sSL http://${req.get('host')}/agent/install.sh | sudo bash -s -- --foundry http://${req.get('host')} --token ${rawAuthToken} --id ${id}`;
 
   res.status(201).json({
     server,

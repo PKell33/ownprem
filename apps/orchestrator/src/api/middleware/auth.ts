@@ -1,29 +1,145 @@
 import type { Request, Response, NextFunction } from 'express';
+import { authService, TokenPayload } from '../../services/authService.js';
+import { config } from '../../config.js';
 
 export interface AuthenticatedRequest extends Request {
-  session?: {
-    valid: boolean;
-    userId?: string;
-  };
+  user?: TokenPayload;
+  requestId?: string;
 }
 
+/**
+ * Extract token from Authorization header
+ */
+function extractToken(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return null;
+  }
+
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
+    return null;
+  }
+
+  return parts[1];
+}
+
+/**
+ * Require authentication - returns 401 if no valid token
+ */
 export function requireAuth(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ): void {
-  // For Phase 1, auth is not implemented
-  // All requests are allowed
-  req.session = { valid: true };
+  const token = extractToken(req);
+
+  if (!token) {
+    res.status(401).json({
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+      },
+    });
+    return;
+  }
+
+  const payload = authService.verifyAccessToken(token);
+  if (!payload) {
+    res.status(401).json({
+      error: {
+        code: 'INVALID_TOKEN',
+        message: 'Invalid or expired token',
+      },
+    });
+    return;
+  }
+
+  req.user = payload;
   next();
 }
 
+/**
+ * Optional authentication - sets user if valid token, continues anyway
+ */
 export function optionalAuth(
   req: AuthenticatedRequest,
   _res: Response,
   next: NextFunction
 ): void {
-  // For Phase 1, set session as valid
-  req.session = { valid: true };
+  const token = extractToken(req);
+
+  if (token) {
+    const payload = authService.verifyAccessToken(token);
+    if (payload) {
+      req.user = payload;
+    }
+  }
+
   next();
+}
+
+/**
+ * Require specific role
+ */
+export function requireRole(...roles: string[]) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required',
+        },
+      });
+      return;
+    }
+
+    if (!roles.includes(req.user.role)) {
+      res.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Insufficient permissions',
+        },
+      });
+      return;
+    }
+
+    next();
+  };
+}
+
+/**
+ * Development mode bypass - allows unauthenticated access in development
+ * WARNING: Only use for routes that should be accessible during development
+ */
+export function devBypassAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  // In development, allow unauthenticated access but still try to authenticate
+  if (config.isDevelopment) {
+    const token = extractToken(req);
+    if (token) {
+      const payload = authService.verifyAccessToken(token);
+      if (payload) {
+        req.user = payload;
+      }
+    }
+
+    // If no user set, create a dev user context
+    if (!req.user) {
+      req.user = {
+        userId: 'dev-user',
+        username: 'developer',
+        role: 'admin',
+      };
+    }
+
+    next();
+    return;
+  }
+
+  // In production, require auth
+  requireAuth(req, res, next);
 }

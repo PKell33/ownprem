@@ -53,6 +53,11 @@ export class Connection {
         console.error(`Error handling command ${command.id}:`, err);
       }
     });
+
+    // Handle heartbeat ping/pong
+    this.socket.on('ping', () => {
+      this.socket?.emit('pong');
+    });
   }
 
   disconnect(): void {

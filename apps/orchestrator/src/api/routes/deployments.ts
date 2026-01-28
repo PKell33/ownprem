@@ -4,6 +4,7 @@ import { dependencyResolver } from '../../services/dependencyResolver.js';
 import { serviceRegistry } from '../../services/serviceRegistry.js';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
+import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import type { AppManifest } from '@nodefoundry/shared';
 
 const router = Router();
@@ -25,18 +26,9 @@ router.get('/', async (req, res, next) => {
 });
 
 // POST /api/deployments - Install an app
-router.post('/', async (req, res, next) => {
+router.post('/', validateBody(schemas.deployments.create), async (req, res, next) => {
   try {
     const { serverId, appName, config, version } = req.body;
-
-    if (!serverId || typeof serverId !== 'string') {
-      throw createError('serverId is required', 400, 'INVALID_SERVER_ID');
-    }
-
-    if (!appName || typeof appName !== 'string') {
-      throw createError('appName is required', 400, 'INVALID_APP_NAME');
-    }
-
     const deployment = await deployer.install(serverId, appName, config || {}, version);
     res.status(201).json(deployment);
   } catch (err) {
@@ -45,13 +37,9 @@ router.post('/', async (req, res, next) => {
 });
 
 // POST /api/deployments/validate - Validate before install
-router.post('/validate', async (req, res, next) => {
+router.post('/validate', validateBody(schemas.deployments.validate), async (req, res, next) => {
   try {
     const { serverId, appName } = req.body;
-
-    if (!serverId || !appName) {
-      throw createError('serverId and appName are required', 400, 'INVALID_REQUEST');
-    }
 
     const db = getDb();
     const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(appName) as AppRegistryRow | undefined;

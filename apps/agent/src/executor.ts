@@ -1,10 +1,17 @@
-import { execSync, spawn } from 'child_process';
-import { writeFileSync, mkdirSync, existsSync, chmodSync } from 'fs';
-import { dirname } from 'path';
+import { execSync, spawn, ChildProcess } from 'child_process';
+import { writeFileSync, mkdirSync, existsSync, chmodSync, realpathSync } from 'fs';
+import { dirname, resolve } from 'path';
 import type { CommandPayload, ConfigFile } from '@nodefoundry/shared';
 
 export class Executor {
-  constructor(private appsDir: string = '/opt/nodefoundry/apps') {}
+  private runningProcesses: Map<string, ChildProcess> = new Map();
+  private appsDir: string;
+
+  constructor(appsDir: string = '/opt/nodefoundry/apps') {
+    // Ensure appsDir is absolute
+    this.appsDir = resolve(appsDir);
+    mkdirSync(this.appsDir, { recursive: true });
+  }
 
   async install(appName: string, payload: CommandPayload): Promise<void> {
     const appDir = `${this.appsDir}/${appName}`;
@@ -64,6 +71,57 @@ export class Executor {
   }
 
   async systemctl(action: string, service: string): Promise<void> {
+    // First try systemctl
+    try {
+      await this.runSystemctl(action, service);
+      return;
+    } catch (err) {
+      // If systemctl fails, try dev mode fallback
+      console.log(`systemctl failed, trying dev mode fallback for ${action} ${service}`);
+    }
+
+    // Dev mode fallback
+    const appDir = `${this.appsDir}/${service}`;
+    const startScript = `${appDir}/start.sh`;
+
+    if (action === 'start') {
+      if (existsSync(startScript)) {
+        // Run start.sh in background
+        const proc = spawn('bash', [startScript], {
+          cwd: appDir,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: true,
+        });
+
+        proc.stdout?.on('data', (data) => console.log(`[${service}] ${data.toString().trim()}`));
+        proc.stderr?.on('data', (data) => console.error(`[${service}] ${data.toString().trim()}`));
+
+        this.runningProcesses.set(service, proc);
+        proc.unref();
+        console.log(`Started ${service} in dev mode (pid: ${proc.pid})`);
+      } else {
+        throw new Error(`No start.sh found for ${service} in dev mode`);
+      }
+    } else if (action === 'stop') {
+      const proc = this.runningProcesses.get(service);
+      if (proc && proc.pid) {
+        try {
+          process.kill(-proc.pid, 'SIGTERM');
+        } catch {
+          process.kill(proc.pid, 'SIGTERM');
+        }
+        this.runningProcesses.delete(service);
+        console.log(`Stopped ${service} in dev mode`);
+      } else {
+        console.log(`${service} not running in dev mode`);
+      }
+    } else if (action === 'restart') {
+      await this.systemctl('stop', service);
+      await this.systemctl('start', service);
+    }
+  }
+
+  private runSystemctl(action: string, service: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const proc = spawn('systemctl', [action, service], {
         stdio: 'inherit',

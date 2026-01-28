@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useApps, useDeployments, useServers, useInstallApp, useStartDeployment, useStopDeployment, useRestartDeployment, useUninstallDeployment } from '../hooks/useApi';
+import { useApps, useDeployments, useServers, useStartDeployment, useStopDeployment, useRestartDeployment, useUninstallDeployment } from '../hooks/useApi';
 import AppCard from '../components/AppCard';
 import InstallModal from '../components/InstallModal';
 

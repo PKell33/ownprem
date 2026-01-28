@@ -1,0 +1,34 @@
+# Nodefoundry Development Caddyfile
+# Proxies to Vite dev server and API
+
+{
+	local_certs
+}
+
+foundry.local {
+	tls internal
+
+	# API proxy
+	handle /api/* {
+		reverse_proxy localhost:3001
+	}
+
+	# WebSocket proxy
+	handle /socket.io/* {
+		reverse_proxy localhost:3001
+	}
+
+	# Health endpoints
+	handle /health {
+		reverse_proxy localhost:3001
+	}
+
+	handle /ready {
+		reverse_proxy localhost:3001
+	}
+
+	# Everything else to Vite dev server
+	handle {
+		reverse_proxy localhost:5173
+	}
+}

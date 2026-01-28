@@ -1,10 +1,13 @@
 #!/bin/bash
 set -e
 
+# Convert to absolute path
 APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/mock-app}"
+APP_DIR="$(cd "$(dirname "$APP_DIR")" && pwd)/$(basename "$APP_DIR")"
 MESSAGE="${MESSAGE:-Hello from Mock App}"
 
 echo "Installing Mock App..."
+echo "APP_DIR: $APP_DIR"
 
 # Create app directory
 mkdir -p "$APP_DIR"
@@ -46,8 +49,9 @@ server.listen(9999, '0.0.0.0', () => {
 });
 EOF
 
-# Create systemd service
-cat > /etc/systemd/system/mock-app.service << EOF
+# Only create systemd service if running as root
+if [ "$(id -u)" = "0" ]; then
+  cat > /etc/systemd/system/mock-app.service << EOF
 [Unit]
 Description=Mock App
 After=network.target
@@ -65,7 +69,19 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable mock-app
+  systemctl daemon-reload
+  systemctl enable mock-app
+  echo "Systemd service created"
+else
+  echo "Not running as root - skipping systemd service creation"
+  # For dev mode, create a simple start script instead
+  cat > "$APP_DIR/start.sh" << EOF
+#!/bin/bash
+cd "$APP_DIR"
+MESSAGE="$MESSAGE" SERVER_ID="${SERVER_ID:-foundry}" node server.js
+EOF
+  chmod +x "$APP_DIR/start.sh"
+  echo "Created start.sh for manual execution"
+fi
 
 echo "Mock App installed successfully!"

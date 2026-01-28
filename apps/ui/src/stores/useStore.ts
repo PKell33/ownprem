@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Server, Deployment, ServerMetrics } from '../api/client';
+import type { Server, Deployment } from '../api/client';
 
 interface StoreState {
   // Connection

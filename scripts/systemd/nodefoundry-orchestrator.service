@@ -1,0 +1,43 @@
+[Unit]
+Description=Nodefoundry Orchestrator
+Documentation=https://github.com/nodefoundry/nodefoundry
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nodefoundry
+Group=nodefoundry
+
+# Working directory
+WorkingDirectory=/opt/nodefoundry/repo
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/nodefoundry/orchestrator.env
+
+# Start command
+ExecStart=/usr/bin/node /opt/nodefoundry/repo/apps/orchestrator/dist/index.js
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/nodefoundry /var/log/nodefoundry
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=1G
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nodefoundry-orchestrator
+
+[Install]
+WantedBy=multi-user.target

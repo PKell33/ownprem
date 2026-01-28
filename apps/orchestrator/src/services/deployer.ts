@@ -156,7 +156,7 @@ export class Deployer {
         files: configFiles,
         env,
       },
-    });
+    }, deploymentId);
 
     if (!sent) {
       // Rollback
@@ -175,7 +175,7 @@ export class Deployer {
       await proxyManager.registerRoute(deploymentId, manifest, serverHost);
     }
 
-    return this.getDeployment(deploymentId)!;
+    return (await this.getDeployment(deploymentId))!;
   }
 
   async configure(deploymentId: string, newConfig: Record<string, unknown>): Promise<Deployment> {
@@ -218,9 +218,9 @@ export class Deployer {
       payload: {
         files: configFiles,
       },
-    });
+    }, deploymentId);
 
-    return this.getDeployment(deploymentId)!;
+    return (await this.getDeployment(deploymentId))!;
   }
 
   async start(deploymentId: string): Promise<Deployment> {
@@ -247,9 +247,9 @@ export class Deployer {
       id: commandId,
       action: 'start',
       appName: deployment.appName,
-    });
+    }, deploymentId);
 
-    return this.getDeployment(deploymentId)!;
+    return (await this.getDeployment(deploymentId))!;
   }
 
   async stop(deploymentId: string): Promise<Deployment> {
@@ -276,9 +276,9 @@ export class Deployer {
       id: commandId,
       action: 'stop',
       appName: deployment.appName,
-    });
+    }, deploymentId);
 
-    return this.getDeployment(deploymentId)!;
+    return (await this.getDeployment(deploymentId))!;
   }
 
   async restart(deploymentId: string): Promise<Deployment> {
@@ -297,7 +297,7 @@ export class Deployer {
       id: commandId,
       action: 'restart',
       appName: deployment.appName,
-    });
+    }, deploymentId);
 
     return deployment;
   }
@@ -325,7 +325,7 @@ export class Deployer {
       id: commandId,
       action: 'uninstall',
       appName: deployment.appName,
-    });
+    }, deploymentId);
 
     // Remove proxy route
     await proxyManager.unregisterRoute(deploymentId);

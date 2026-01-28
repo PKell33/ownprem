@@ -16,7 +16,8 @@ class Agent {
     private foundryUrl: string,
     private authToken: string | null
   ) {
-    this.executor = new Executor();
+    const appsDir = process.env.APPS_DIR || '/opt/nodefoundry/apps';
+    this.executor = new Executor(appsDir);
     this.reporter = new Reporter(serverId);
 
     this.connection = new Connection({

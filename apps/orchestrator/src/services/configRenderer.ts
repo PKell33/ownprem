@@ -116,7 +116,7 @@ export class ConfigRenderer {
 
         // Determine output path from template name
         const outputName = templateFile.replace('.njk', '');
-        const outputPath = `/opt/nodefoundry/apps/${manifest.name}/${outputName}`;
+        const outputPath = `${config.paths.apps}/${manifest.name}/${outputName}`;
 
         files.push({
           path: outputPath,
@@ -138,7 +138,7 @@ export class ConfigRenderer {
     }
 
     const script = readFileSync(scriptPath, 'utf-8');
-    const appDir = `/opt/nodefoundry/apps/${manifest.name}`;
+    const appDir = `${config.paths.apps}/${manifest.name}`;
 
     return {
       path: `${appDir}/install.sh`,
@@ -156,7 +156,7 @@ export class ConfigRenderer {
     }
 
     const script = readFileSync(scriptPath, 'utf-8');
-    const appDir = `/opt/nodefoundry/apps/${manifest.name}`;
+    const appDir = `${config.paths.apps}/${manifest.name}`;
 
     return {
       path: `${appDir}/configure.sh`,
@@ -174,7 +174,7 @@ export class ConfigRenderer {
     }
 
     const script = readFileSync(scriptPath, 'utf-8');
-    const appDir = `/opt/nodefoundry/apps/${manifest.name}`;
+    const appDir = `${config.paths.apps}/${manifest.name}`;
 
     return {
       path: `${appDir}/uninstall.sh`,

@@ -1,0 +1,229 @@
+import { Router } from 'express';
+import { authService } from '../../services/authService.js';
+import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
+import { validateBody, schemas } from '../middleware/validate.js';
+import { getDb } from '../../db/index.js';
+import { config } from '../../config.js';
+
+const router = Router();
+
+/**
+ * POST /api/auth/login
+ * Authenticate user and return tokens
+ */
+router.post('/login', validateBody(schemas.auth.login), async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    const user = await authService.validateCredentials(username, password);
+    if (!user) {
+      // Log failed attempt
+      logAudit(null, 'login_failed', 'user', username, req.ip, { reason: 'invalid_credentials' });
+
+      return res.status(401).json({
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid username or password',
+        },
+      });
+    }
+
+    const tokens = authService.generateTokens(user);
+
+    // Log successful login
+    logAudit(user.id, 'login', 'user', user.id, req.ip, {});
+
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      },
+      ...tokens,
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Login failed',
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/auth/refresh
+ * Refresh access token using refresh token
+ */
+router.post('/refresh', validateBody(schemas.auth.refresh), async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    const tokens = await authService.refreshAccessToken(refreshToken);
+    if (!tokens) {
+      return res.status(401).json({
+        error: {
+          code: 'INVALID_TOKEN',
+          message: 'Invalid or expired refresh token',
+        },
+      });
+    }
+
+    res.json(tokens);
+  } catch (err) {
+    console.error('Token refresh error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Token refresh failed',
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * Revoke refresh token
+ */
+router.post('/logout', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (refreshToken) {
+      await authService.revokeRefreshToken(refreshToken);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Logout failed',
+      },
+    });
+  }
+});
+
+/**
+ * GET /api/auth/me
+ * Get current user info
+ */
+router.get('/me', requireAuth, (req: AuthenticatedRequest, res) => {
+  if (!req.user) {
+    return res.status(401).json({
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'Not authenticated',
+      },
+    });
+  }
+
+  const user = authService.getUser(req.user.userId);
+  if (!user) {
+    return res.status(404).json({
+      error: {
+        code: 'USER_NOT_FOUND',
+        message: 'User not found',
+      },
+    });
+  }
+
+  res.json(user);
+});
+
+/**
+ * POST /api/auth/change-password
+ * Change current user's password
+ */
+router.post('/change-password', requireAuth, validateBody(schemas.auth.changePassword), async (req: AuthenticatedRequest, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+
+    const success = await authService.changePassword(req.user!.userId, oldPassword, newPassword);
+    if (!success) {
+      return res.status(401).json({
+        error: {
+          code: 'INVALID_PASSWORD',
+          message: 'Current password is incorrect',
+        },
+      });
+    }
+
+    logAudit(req.user!.userId, 'password_changed', 'user', req.user!.userId, req.ip, {});
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Password change failed',
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/auth/setup
+ * Initial admin user setup (only works if no users exist)
+ */
+router.post('/setup', validateBody(schemas.auth.setup), async (req, res) => {
+  try {
+    const db = getDb();
+    const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+
+    if (userCount.count > 0) {
+      return res.status(403).json({
+        error: {
+          code: 'SETUP_COMPLETE',
+          message: 'Setup already complete. Users exist.',
+        },
+      });
+    }
+
+    const { username, password } = req.body;
+
+    const userId = await authService.createUser(username, password, 'admin');
+
+    logAudit(userId, 'user_created', 'user', userId, req.ip, { setup: true });
+
+    res.status(201).json({
+      success: true,
+      message: 'Admin user created. You can now log in.',
+    });
+  } catch (err) {
+    console.error('Setup error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Setup failed',
+      },
+    });
+  }
+});
+
+/**
+ * Helper to log audit events
+ */
+function logAudit(
+  userId: string | null,
+  action: string,
+  resourceType: string,
+  resourceId: string,
+  ipAddress: string | undefined,
+  details: Record<string, unknown>
+): void {
+  try {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO audit_log (user_id, action, resource_type, resource_id, ip_address, details)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(userId, action, resourceType, resourceId, ipAddress || null, JSON.stringify(details));
+  } catch (err) {
+    console.error('Failed to log audit event:', err);
+  }
+}
+
+export default router;

@@ -180,6 +180,7 @@ export interface ConfigField {
   required?: boolean;
   generated?: boolean;
   secret?: boolean;
+  inheritFrom?: string;
 }
 
 export interface ServiceRequirement {

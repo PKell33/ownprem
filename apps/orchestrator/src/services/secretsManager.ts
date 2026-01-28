@@ -9,22 +9,51 @@ const SALT_LENGTH = 32;
 
 export class SecretsManager {
   private key: Buffer | null = null;
+  private initialized: boolean = false;
 
-  private getKey(): Buffer {
-    if (this.key) {
-      return this.key;
-    }
+  /**
+   * Validate secrets configuration at startup
+   * Throws in production if SECRETS_KEY is not configured
+   */
+  validateConfiguration(): void {
+    if (this.initialized) return;
 
     const secretsKey = config.secrets.key;
+
     if (!secretsKey) {
-      // Generate a random key for development
-      console.warn('No SECRETS_KEY configured, using random key (secrets will not persist across restarts)');
-      this.key = randomBytes(32);
-      return this.key;
+      if (config.isDevelopment) {
+        console.warn('WARNING: No SECRETS_KEY configured. Using ephemeral key for development.');
+        console.warn('         Secrets will NOT persist across restarts!');
+        console.warn('         Set SECRETS_KEY environment variable for persistence.');
+        // Generate a persistent key for this session
+        this.key = randomBytes(32);
+      } else {
+        throw new Error(
+          'SECRETS_KEY environment variable is required in production. ' +
+          'Generate one with: openssl rand -base64 32'
+        );
+      }
+    } else {
+      if (secretsKey.length < 32) {
+        throw new Error('SECRETS_KEY must be at least 32 characters long');
+      }
+      // Derive a key from the configured secret using a static salt
+      // Note: In a real production system, you might want to use a unique salt
+      this.key = scryptSync(secretsKey, 'nodefoundry-secrets-v1', 32);
     }
 
-    // Derive a key from the configured secret
-    this.key = scryptSync(secretsKey, 'nodefoundry-secrets', 32);
+    this.initialized = true;
+  }
+
+  private getKey(): Buffer {
+    if (!this.initialized) {
+      this.validateConfiguration();
+    }
+
+    if (!this.key) {
+      throw new Error('Secrets manager not properly initialized');
+    }
+
     return this.key;
   }
 

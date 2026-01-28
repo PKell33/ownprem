@@ -1,0 +1,90 @@
+# Nodefoundry Local Development Caddyfile
+# Self-signed HTTPS for local testing
+#
+# Usage:
+#   1. Add "127.0.0.1 foundry.local" to /etc/hosts
+#   2. caddy run --config Caddyfile.local
+#   3. Accept the self-signed certificate in your browser
+
+{
+	# Use internal CA for local development
+	local_certs
+	auto_https disable_redirects
+}
+
+foundry.local {
+	# TLS with self-signed cert
+	tls internal
+
+	# Security headers (relaxed for development)
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# Serve static UI files (production build)
+	# For dev with Vite, comment this out and use the Vite dev server section below
+	root * /home/sysadmin/projects/nodefoundry/apps/ui/dist
+
+	# API proxy
+	handle /api/* {
+		reverse_proxy localhost:3001 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# WebSocket proxy
+	handle /socket.io/* {
+		reverse_proxy localhost:3001 {
+			header_up Connection {>Connection}
+			header_up Upgrade {>Upgrade}
+		}
+	}
+
+	# Health endpoints
+	handle /health {
+		reverse_proxy localhost:3001
+	}
+
+	handle /ready {
+		reverse_proxy localhost:3001
+	}
+
+	# App proxies
+	handle /apps/* {
+		reverse_proxy localhost:3001
+	}
+
+	# SPA fallback
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Alternative: Proxy to Vite dev server (uncomment for hot reload)
+# foundry.local {
+# 	tls internal
+#
+# 	# API and WebSocket to orchestrator
+# 	handle /api/* {
+# 		reverse_proxy localhost:3001
+# 	}
+# 	handle /socket.io/* {
+# 		reverse_proxy localhost:3001 {
+# 			header_up Connection {>Connection}
+# 			header_up Upgrade {>Upgrade}
+# 		}
+# 	}
+#
+# 	# Everything else to Vite dev server
+# 	handle {
+# 		reverse_proxy localhost:5173 {
+# 			header_up Connection {>Connection}
+# 			header_up Upgrade {>Upgrade}
+# 		}
+# 	}
+# }

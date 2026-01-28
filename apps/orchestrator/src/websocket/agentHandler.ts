@@ -1,5 +1,7 @@
 import type { Socket, Server as SocketServer } from 'socket.io';
+import { timingSafeEqual, createHash } from 'crypto';
 import { getDb } from '../db/index.js';
+import { wsLogger } from '../lib/logger.js';
 import type { AgentStatusReport, CommandResult, ServerMetrics } from '@nodefoundry/shared';
 
 interface AgentAuth {
@@ -13,23 +15,66 @@ interface ServerRow {
   is_foundry: number;
 }
 
-const connectedAgents = new Map<string, Socket>();
+interface AgentConnection {
+  socket: Socket;
+  serverId: string;
+  lastSeen: Date;
+  heartbeatInterval?: NodeJS.Timeout;
+}
+
+const connectedAgents = new Map<string, AgentConnection>();
+
+// Heartbeat configuration
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const HEARTBEAT_TIMEOUT = 90000;  // 90 seconds
 
 export function getConnectedAgents(): Map<string, Socket> {
-  return connectedAgents;
+  const result = new Map<string, Socket>();
+  for (const [id, conn] of connectedAgents) {
+    result.set(id, conn.socket);
+  }
+  return result;
 }
 
 export function isAgentConnected(serverId: string): boolean {
   return connectedAgents.has(serverId);
 }
 
+/**
+ * Hash a token for storage
+ */
+export function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Securely compare tokens using timing-safe comparison
+ */
+function verifyToken(providedToken: string, storedHash: string): boolean {
+  const providedHash = hashToken(providedToken);
+  const providedBuffer = Buffer.from(providedHash, 'hex');
+  const storedBuffer = Buffer.from(storedHash, 'hex');
+
+  if (providedBuffer.length !== storedBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(providedBuffer, storedBuffer);
+}
+
 export function setupAgentHandler(io: SocketServer): void {
+  // Start cleanup interval for stale connections
+  setInterval(() => {
+    cleanupStaleConnections();
+  }, HEARTBEAT_INTERVAL);
+
   io.on('connection', (socket: Socket) => {
     const auth = socket.handshake.auth as AgentAuth;
     const { serverId, token } = auth;
+    const clientIp = socket.handshake.address;
 
     if (!serverId) {
-      console.warn('Agent connection rejected: no serverId');
+      wsLogger.warn({ clientIp }, 'Agent connection rejected: no serverId');
       socket.disconnect();
       return;
     }
@@ -39,20 +84,52 @@ export function setupAgentHandler(io: SocketServer): void {
     const server = db.prepare('SELECT id, auth_token, is_foundry FROM servers WHERE id = ?').get(serverId) as ServerRow | undefined;
 
     if (!server) {
-      console.warn(`Agent connection rejected: unknown server ${serverId}`);
+      wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: unknown server');
       socket.disconnect();
       return;
     }
 
     // Foundry doesn't need a token (local connection)
-    if (!server.is_foundry && server.auth_token !== token) {
-      console.warn(`Agent connection rejected: invalid token for ${serverId}`);
-      socket.disconnect();
-      return;
+    // For other servers, verify the token
+    if (!server.is_foundry) {
+      if (!token || !server.auth_token) {
+        wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: missing token');
+        socket.disconnect();
+        return;
+      }
+
+      if (!verifyToken(token, server.auth_token)) {
+        wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: invalid token');
+        socket.disconnect();
+        return;
+      }
     }
 
-    console.log(`Agent connected: ${serverId}`);
-    connectedAgents.set(serverId, socket);
+    // Disconnect existing connection for this server (prevent duplicates)
+    const existingConn = connectedAgents.get(serverId);
+    if (existingConn) {
+      wsLogger.info({ serverId }, 'Disconnecting existing agent connection');
+      if (existingConn.heartbeatInterval) {
+        clearInterval(existingConn.heartbeatInterval);
+      }
+      existingConn.socket.disconnect();
+    }
+
+    wsLogger.info({ serverId, clientIp }, 'Agent connected');
+
+    // Create connection entry
+    const connection: AgentConnection = {
+      socket,
+      serverId,
+      lastSeen: new Date(),
+    };
+
+    // Set up heartbeat
+    connection.heartbeatInterval = setInterval(() => {
+      socket.emit('ping');
+    }, HEARTBEAT_INTERVAL);
+
+    connectedAgents.set(serverId, connection);
 
     // Update server status
     db.prepare(`
@@ -63,8 +140,20 @@ export function setupAgentHandler(io: SocketServer): void {
     // Emit to clients that server is connected
     io.emit('server:connected', { serverId, timestamp: new Date() });
 
+    // Handle pong (heartbeat response)
+    socket.on('pong', () => {
+      const conn = connectedAgents.get(serverId);
+      if (conn) {
+        conn.lastSeen = new Date();
+      }
+    });
+
     // Handle status reports from agent
     socket.on('status', (report: AgentStatusReport) => {
+      const conn = connectedAgents.get(serverId);
+      if (conn) {
+        conn.lastSeen = new Date();
+      }
       handleStatusReport(io, serverId, report);
     });
 
@@ -74,8 +163,13 @@ export function setupAgentHandler(io: SocketServer): void {
     });
 
     // Handle disconnect
-    socket.on('disconnect', () => {
-      console.log(`Agent disconnected: ${serverId}`);
+    socket.on('disconnect', (reason) => {
+      wsLogger.info({ serverId, reason }, 'Agent disconnected');
+
+      const conn = connectedAgents.get(serverId);
+      if (conn?.heartbeatInterval) {
+        clearInterval(conn.heartbeatInterval);
+      }
       connectedAgents.delete(serverId);
 
       db.prepare(`
@@ -86,6 +180,32 @@ export function setupAgentHandler(io: SocketServer): void {
       io.emit('server:disconnected', { serverId, timestamp: new Date() });
     });
   });
+}
+
+/**
+ * Clean up connections that haven't responded to heartbeats
+ */
+function cleanupStaleConnections(): void {
+  const now = Date.now();
+  const db = getDb();
+
+  for (const [serverId, conn] of connectedAgents) {
+    const lastSeenMs = conn.lastSeen.getTime();
+    if (now - lastSeenMs > HEARTBEAT_TIMEOUT) {
+      wsLogger.warn({ serverId, lastSeen: conn.lastSeen }, 'Disconnecting stale agent connection');
+
+      if (conn.heartbeatInterval) {
+        clearInterval(conn.heartbeatInterval);
+      }
+      conn.socket.disconnect();
+      connectedAgents.delete(serverId);
+
+      db.prepare(`
+        UPDATE servers SET agent_status = 'offline', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(serverId);
+    }
+  }
 }
 
 function handleStatusReport(io: SocketServer, serverId: string, report: AgentStatusReport): void {
@@ -131,11 +251,25 @@ function mapAppStatusToDeploymentStatus(appStatus: string): string {
 function handleCommandResult(io: SocketServer, serverId: string, result: CommandResult): void {
   const db = getDb();
 
+  // Get command info to update deployment status
+  const commandRow = db.prepare('SELECT deployment_id, action FROM command_log WHERE id = ?').get(result.commandId) as { deployment_id: string | null; action: string } | undefined;
+
   // Update command log
   db.prepare(`
     UPDATE command_log SET status = ?, result_message = ?, completed_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(result.status, result.message || null, result.commandId);
+
+  // Update deployment status based on command result
+  if (commandRow?.deployment_id) {
+    const newStatus = getDeploymentStatusFromCommand(commandRow.action, result.status);
+    if (newStatus) {
+      db.prepare(`
+        UPDATE deployments SET status = ?, status_message = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(newStatus, result.message || null, commandRow.deployment_id);
+    }
+  }
 
   // Emit result to clients
   io.emit('command:result', {
@@ -143,24 +277,50 @@ function handleCommandResult(io: SocketServer, serverId: string, result: Command
     ...result,
   });
 
-  console.log(`Command ${result.commandId} completed: ${result.status}${result.message ? ` - ${result.message}` : ''}`);
+  wsLogger.info({
+    commandId: result.commandId,
+    serverId,
+    status: result.status,
+    message: result.message,
+  }, 'Command completed');
 }
 
-export function sendCommand(serverId: string, command: { id: string; action: string; appName: string; payload?: unknown }): boolean {
-  const socket = connectedAgents.get(serverId);
-  if (!socket) {
-    console.warn(`Cannot send command to ${serverId}: not connected`);
+function getDeploymentStatusFromCommand(action: string, resultStatus: string): string | null {
+  if (resultStatus === 'error') {
+    return 'error';
+  }
+
+  switch (action) {
+    case 'install':
+      return resultStatus === 'success' ? 'stopped' : 'error';
+    case 'configure':
+      return resultStatus === 'success' ? 'stopped' : 'error';
+    case 'start':
+      return resultStatus === 'success' ? 'running' : 'error';
+    case 'stop':
+      return resultStatus === 'success' ? 'stopped' : 'error';
+    case 'uninstall':
+      return null; // Deployment is deleted, not updated
+    default:
+      return null;
+  }
+}
+
+export function sendCommand(serverId: string, command: { id: string; action: string; appName: string; payload?: unknown }, deploymentId?: string): boolean {
+  const conn = connectedAgents.get(serverId);
+  if (!conn) {
+    wsLogger.warn({ serverId }, 'Cannot send command: agent not connected');
     return false;
   }
 
-  // Log the command
+  // Log the command with deployment_id for status tracking
   const db = getDb();
   db.prepare(`
-    INSERT INTO command_log (id, server_id, action, payload, status, created_at)
-    VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
-  `).run(command.id, serverId, command.action, JSON.stringify(command.payload || {}));
+    INSERT INTO command_log (id, server_id, deployment_id, action, payload, status, created_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+  `).run(command.id, serverId, deploymentId || null, command.action, JSON.stringify({ appName: command.appName, ...(command.payload || {}) }));
 
-  socket.emit('command', command);
-  console.log(`Command sent to ${serverId}: ${command.action} ${command.appName}`);
+  conn.socket.emit('command', command);
+  wsLogger.info({ serverId, action: command.action, appName: command.appName }, 'Command sent');
   return true;
 }

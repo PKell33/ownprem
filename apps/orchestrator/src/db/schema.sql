@@ -82,6 +82,53 @@ CREATE TABLE IF NOT EXISTS command_log (
     completed_at TIMESTAMP
 );
 
+-- Users for authentication
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT DEFAULT 'admin',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login_at TIMESTAMP
+);
+
+-- Refresh tokens for JWT
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Agent tokens for authentication
+CREATE TABLE IF NOT EXISTS agent_tokens (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_tokens_server ON agent_tokens(server_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(token_hash);
+
+-- Audit log for security
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_id TEXT,
+    action TEXT NOT NULL,
+    resource_type TEXT,
+    resource_id TEXT,
+    ip_address TEXT,
+    details JSON
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
+
 -- Initialize foundry server on first run
 INSERT OR IGNORE INTO servers (id, name, is_foundry, agent_status)
 VALUES ('foundry', 'foundry', TRUE, 'offline');

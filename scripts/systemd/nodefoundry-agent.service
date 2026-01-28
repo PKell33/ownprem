@@ -1,0 +1,42 @@
+[Unit]
+Description=Nodefoundry Agent
+Documentation=https://github.com/nodefoundry/nodefoundry
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nodefoundry
+Group=nodefoundry
+
+# Working directory
+WorkingDirectory=/opt/nodefoundry/repo
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/nodefoundry/agent.env
+
+# Start command
+ExecStart=/usr/bin/node /opt/nodefoundry/repo/apps/agent/dist/index.js
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security hardening (less restrictive - agent needs to manage apps)
+NoNewPrivileges=no
+PrivateTmp=no
+ProtectSystem=no
+ProtectHome=yes
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nodefoundry-agent
+
+[Install]
+WantedBy=multi-user.target
