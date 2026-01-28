@@ -14,18 +14,18 @@ export default function ServerCard({ server, deploymentCount = 0, onClick }: Ser
   return (
     <div
       onClick={onClick}
-      className={`bg-gray-800 rounded-lg p-4 border border-gray-700 ${
-        onClick ? 'cursor-pointer hover:border-gray-600 transition-colors' : ''
+      className={`card p-3 md:p-4 ${
+        onClick ? 'cursor-pointer card-hover' : ''
       }`}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-gray-700 rounded-lg">
-            <Server size={20} className={server.isFoundry ? 'text-bitcoin' : 'text-gray-400'} />
+      <div className="flex items-start justify-between mb-2 md:mb-3">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          <div className="p-1.5 md:p-2 rounded-lg flex-shrink-0 dark:bg-gray-700 light:bg-gray-100">
+            <Server size={18} className={server.isFoundry ? 'text-bitcoin' : 'dark:text-gray-400 light:text-gray-500'} />
           </div>
-          <div>
-            <h3 className="font-medium">{server.name}</h3>
-            <p className="text-sm text-gray-400">
+          <div className="min-w-0">
+            <h3 className="font-medium text-sm md:text-base truncate">{server.name}</h3>
+            <p className="text-xs md:text-sm dark:text-gray-400 light:text-gray-500 truncate">
               {server.isFoundry ? 'Orchestrator' : server.host || 'Unknown'}
             </p>
           </div>
@@ -34,26 +34,26 @@ export default function ServerCard({ server, deploymentCount = 0, onClick }: Ser
       </div>
 
       {metrics && server.agentStatus === 'online' && (
-        <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-700">
+        <div className="grid grid-cols-3 gap-1 md:gap-2 mt-2 md:mt-3 pt-2 md:pt-3 border-t dark:border-gray-700 light:border-gray-200">
           <MetricItem
-            icon={<Cpu size={14} />}
+            icon={<Cpu size={12} />}
             label="CPU"
             value={`${metrics.cpuPercent}%`}
           />
           <MetricItem
-            icon={<MemoryStick size={14} />}
+            icon={<MemoryStick size={12} />}
             label="RAM"
             value={formatBytes(metrics.memoryUsed)}
           />
           <MetricItem
-            icon={<HardDrive size={14} />}
+            icon={<HardDrive size={12} />}
             label="Disk"
             value={formatBytes(metrics.diskUsed)}
           />
         </div>
       )}
 
-      <div className="mt-3 pt-3 border-t border-gray-700 text-sm text-gray-400">
+      <div className="mt-2 md:mt-3 pt-2 md:pt-3 border-t dark:border-gray-700 light:border-gray-200 text-xs md:text-sm dark:text-gray-400 light:text-gray-500">
         {deploymentCount} app{deploymentCount !== 1 ? 's' : ''} deployed
       </div>
     </div>
@@ -63,11 +63,11 @@ export default function ServerCard({ server, deploymentCount = 0, onClick }: Ser
 function MetricItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="text-center">
-      <div className="flex items-center justify-center gap-1 text-gray-400 mb-1">
+      <div className="flex items-center justify-center gap-1 dark:text-gray-400 light:text-gray-500 mb-0.5 md:mb-1">
         {icon}
-        <span className="text-xs">{label}</span>
+        <span className="text-[10px] md:text-xs">{label}</span>
       </div>
-      <div className="text-sm font-medium">{value}</div>
+      <div className="text-xs md:text-sm font-medium">{value}</div>
     </div>
   );
 }

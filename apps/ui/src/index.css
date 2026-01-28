@@ -6,8 +6,142 @@
   --color-bitcoin: #f7931a;
 }
 
-body {
+/* Dark mode (default) */
+.dark {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-tertiary: #374151;
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --border-color: #374151;
+}
+
+/* Light mode */
+.light {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-tertiary: #f3f4f6;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --border-color: #e5e7eb;
+}
+
+/* Apply theme colors */
+.dark body {
   @apply bg-gray-900 text-gray-100;
+}
+
+.light body {
+  @apply bg-white text-gray-900;
+}
+
+/* Theme-aware component classes */
+@layer components {
+  .card {
+    @apply rounded-lg border transition-colors;
+  }
+
+  .dark .card {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .light .card {
+    @apply bg-white border-gray-200 shadow-sm;
+  }
+
+  .card-hover {
+    @apply card;
+  }
+
+  .dark .card-hover:hover {
+    @apply border-gray-600;
+  }
+
+  .light .card-hover:hover {
+    @apply border-gray-300 shadow-md;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors;
+  }
+
+  .dark .input-field {
+    @apply bg-gray-700 border-gray-600 text-white placeholder-gray-400;
+  }
+
+  .light .input-field {
+    @apply bg-white border-gray-300 text-gray-900 placeholder-gray-500;
+  }
+
+  .sidebar {
+    @apply border-r transition-colors;
+  }
+
+  .dark .sidebar {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .light .sidebar {
+    @apply bg-gray-50 border-gray-200;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg transition-colors;
+  }
+
+  .dark .nav-item {
+    @apply text-gray-400 hover:text-white hover:bg-gray-700/50;
+  }
+
+  .dark .nav-item.active {
+    @apply bg-gray-700 text-white;
+  }
+
+  .light .nav-item {
+    @apply text-gray-600 hover:text-gray-900 hover:bg-gray-200/50;
+  }
+
+  .light .nav-item.active {
+    @apply bg-gray-200 text-gray-900;
+  }
+
+  .table-header {
+    @apply text-left text-sm font-medium;
+  }
+
+  .dark .table-header {
+    @apply bg-gray-700/50 text-gray-300;
+  }
+
+  .light .table-header {
+    @apply bg-gray-100 text-gray-600;
+  }
+
+  .table-row {
+    @apply border-b transition-colors;
+  }
+
+  .dark .table-row {
+    @apply border-gray-700/50 hover:bg-gray-700/30;
+  }
+
+  .light .table-row {
+    @apply border-gray-200 hover:bg-gray-50;
+  }
+
+  .text-muted {
+    @apply transition-colors;
+  }
+
+  .dark .text-muted {
+    @apply text-gray-400;
+  }
+
+  .light .text-muted {
+    @apply text-gray-500;
+  }
 }
 
 /* Custom scrollbar */
@@ -16,16 +150,28 @@ body {
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
+.dark ::-webkit-scrollbar-track {
   @apply bg-gray-800;
 }
 
-::-webkit-scrollbar-thumb {
+.light ::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+.dark ::-webkit-scrollbar-thumb {
   @apply bg-gray-600 rounded;
 }
 
-::-webkit-scrollbar-thumb:hover {
+.light ::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
   @apply bg-gray-500;
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
 }
 
 /* Status indicators */
@@ -55,4 +201,31 @@ body {
 
 .status-installing {
   @apply bg-blue-500 animate-pulse;
+}
+
+/* Mobile responsive utilities */
+@media (max-width: 768px) {
+  .mobile-hidden {
+    display: none;
+  }
+
+  .mobile-full {
+    width: 100%;
+  }
+}
+
+/* Chart styles */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke-opacity: 0.1;
+}
+
+.dark .recharts-cartesian-grid-horizontal line,
+.dark .recharts-cartesian-grid-vertical line {
+  stroke: #fff;
+}
+
+.light .recharts-cartesian-grid-horizontal line,
+.light .recharts-cartesian-grid-vertical line {
+  stroke: #000;
 }

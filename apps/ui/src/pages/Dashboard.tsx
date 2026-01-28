@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom';
-import { Server, Package, Activity, ExternalLink } from 'lucide-react';
+import { Server, Package, Activity, ExternalLink, Cpu, MemoryStick, HardDrive } from 'lucide-react';
 import { useServers, useDeployments, useSystemStatus } from '../hooks/useApi';
 import ServerCard from '../components/ServerCard';
 import StatusBadge from '../components/StatusBadge';
+import { AggregatedMetricsChart } from '../components/MetricsChart';
 
 export default function Dashboard() {
   const { data: servers, isLoading: serversLoading } = useServers();
@@ -16,48 +17,83 @@ export default function Dashboard() {
     return ['mempool', 'rtl', 'thunderhub', 'mock-app'].includes(d.appName);
   });
 
+  const onlineServers = servers?.filter((s) => s.agentStatus === 'online') || [];
+  const serverIds = onlineServers.map((s) => s.id);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 md:space-y-8">
       <div>
-        <h1 className="text-2xl font-bold mb-2">Dashboard</h1>
-        <p className="text-gray-400">Overview of your Bitcoin infrastructure</p>
+        <h1 className="text-xl md:text-2xl font-bold mb-1 md:mb-2">Dashboard</h1>
+        <p className="text-sm md:text-base dark:text-gray-400 light:text-gray-500">
+          Overview of your Bitcoin infrastructure
+        </p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-2 md:gap-4">
         <StatCard
-          icon={<Server className="text-bitcoin" />}
+          icon={<Server className="text-bitcoin" size={20} />}
           label="Servers"
           value={status?.servers.online || 0}
-          subtext={`of ${status?.servers.total || 0} online`}
+          subtext={`of ${status?.servers.total || 0}`}
         />
         <StatCard
-          icon={<Package className="text-green-500" />}
-          label="Running Apps"
+          icon={<Package className="text-green-500" size={20} />}
+          label="Running"
           value={status?.deployments.running || 0}
-          subtext={`of ${status?.deployments.total || 0} deployed`}
+          subtext={`of ${status?.deployments.total || 0}`}
         />
         <StatCard
-          icon={<Activity className="text-blue-500" />}
+          icon={<Activity className="text-blue-500" size={20} />}
           label="Status"
-          value={status?.status === 'ok' ? 'Healthy' : 'Issues'}
-          subtext="System status"
+          value={status?.status === 'ok' ? 'OK' : '!'}
+          subtext={status?.status === 'ok' ? 'Healthy' : 'Issues'}
         />
       </div>
 
+      {/* Resource Usage Charts */}
+      {serverIds.length > 0 && (
+        <section>
+          <h2 className="text-base md:text-lg font-semibold mb-3 md:mb-4">Resource Usage</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <ChartCard
+              icon={<Cpu size={16} className="text-amber-500" />}
+              title="CPU Usage"
+              serverIds={serverIds}
+              metric="cpu"
+            />
+            <ChartCard
+              icon={<MemoryStick size={16} className="text-blue-500" />}
+              title="Memory Usage"
+              serverIds={serverIds}
+              metric="memory"
+            />
+            <ChartCard
+              icon={<HardDrive size={16} className="text-emerald-500" />}
+              title="Disk Usage"
+              serverIds={serverIds}
+              metric="disk"
+            />
+          </div>
+        </section>
+      )}
+
       {/* Servers */}
       <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Servers</h2>
-          <Link to="/servers" className="text-sm text-gray-400 hover:text-white">
+        <div className="flex items-center justify-between mb-3 md:mb-4">
+          <h2 className="text-base md:text-lg font-semibold">Servers</h2>
+          <Link
+            to="/servers"
+            className="text-sm dark:text-gray-400 light:text-gray-500 hover:text-bitcoin"
+          >
             View all
           </Link>
         </div>
 
         {serversLoading ? (
-          <div className="text-gray-400">Loading...</div>
+          <div className="dark:text-gray-400 light:text-gray-500">Loading...</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
             {servers?.slice(0, 3).map((server) => {
               const serverDeployments = deployments?.filter((d) => d.serverId === server.id) || [];
               return (
@@ -75,21 +111,25 @@ export default function Dashboard() {
       {/* Apps with Web UI */}
       {appsWithWebUI.length > 0 && (
         <section>
-          <h2 className="text-lg font-semibold mb-4">Apps with Web UI</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <h2 className="text-base md:text-lg font-semibold mb-3 md:mb-4">Apps with Web UI</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
             {appsWithWebUI.map((deployment) => (
               <a
                 key={deployment.id}
                 href={`/apps/${deployment.appName}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-gray-600 transition-colors"
+                className="card card-hover p-3 md:p-4"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium capitalize">{deployment.appName}</span>
-                  <ExternalLink size={16} className="text-gray-400" />
+                  <span className="font-medium capitalize text-sm md:text-base truncate">
+                    {deployment.appName}
+                  </span>
+                  <ExternalLink size={14} className="dark:text-gray-400 light:text-gray-500 flex-shrink-0" />
                 </div>
-                <div className="text-sm text-gray-400">{deployment.serverId}</div>
+                <div className="text-xs md:text-sm dark:text-gray-400 light:text-gray-500 truncate">
+                  {deployment.serverId}
+                </div>
               </a>
             ))}
           </div>
@@ -98,50 +138,76 @@ export default function Dashboard() {
 
       {/* Recent Deployments */}
       <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">All Deployments</h2>
-          <Link to="/apps" className="text-sm text-gray-400 hover:text-white">
+        <div className="flex items-center justify-between mb-3 md:mb-4">
+          <h2 className="text-base md:text-lg font-semibold">All Deployments</h2>
+          <Link
+            to="/apps"
+            className="text-sm dark:text-gray-400 light:text-gray-500 hover:text-bitcoin"
+          >
             Manage apps
           </Link>
         </div>
 
         {deploymentsLoading ? (
-          <div className="text-gray-400">Loading...</div>
+          <div className="dark:text-gray-400 light:text-gray-500">Loading...</div>
         ) : deployments?.length === 0 ? (
-          <div className="bg-gray-800 rounded-lg p-8 text-center border border-gray-700">
-            <Package size={48} className="mx-auto mb-4 text-gray-600" />
-            <p className="text-gray-400 mb-4">No apps deployed yet</p>
+          <div className="card p-6 md:p-8 text-center">
+            <Package size={40} className="mx-auto mb-4 dark:text-gray-600 light:text-gray-400" />
+            <p className="dark:text-gray-400 light:text-gray-500 mb-4">No apps deployed yet</p>
             <Link
               to="/apps"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded transition-colors text-sm"
             >
               Browse Apps
             </Link>
           </div>
         ) : (
-          <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">App</th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Server</th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Status</th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-400">Version</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deployments?.map((deployment) => (
-                  <tr key={deployment.id} className="border-b border-gray-700/50 last:border-0">
-                    <td className="px-4 py-3 font-medium">{deployment.appName}</td>
-                    <td className="px-4 py-3 text-gray-400">{deployment.serverId}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={deployment.status} size="sm" />
-                    </td>
-                    <td className="px-4 py-3 text-gray-400">{deployment.version}</td>
+          <div className="card overflow-hidden">
+            {/* Mobile: Card layout */}
+            <div className="md:hidden divide-y dark:divide-gray-700 light:divide-gray-200">
+              {deployments?.map((deployment) => (
+                <div key={deployment.id} className="p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium">{deployment.appName}</span>
+                    <StatusBadge status={deployment.status} size="sm" />
+                  </div>
+                  <div className="flex items-center justify-between text-xs dark:text-gray-400 light:text-gray-500">
+                    <span>{deployment.serverId}</span>
+                    <span>v{deployment.version}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: Table layout */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="table-header border-b dark:border-gray-700 light:border-gray-200">
+                    <th className="px-4 py-3">App</th>
+                    <th className="px-4 py-3">Server</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Version</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {deployments?.map((deployment) => (
+                    <tr key={deployment.id} className="table-row last:border-0">
+                      <td className="px-4 py-3 font-medium">{deployment.appName}</td>
+                      <td className="px-4 py-3 dark:text-gray-400 light:text-gray-500">
+                        {deployment.serverId}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={deployment.status} size="sm" />
+                      </td>
+                      <td className="px-4 py-3 dark:text-gray-400 light:text-gray-500">
+                        {deployment.version}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </section>
@@ -161,13 +227,35 @@ function StatCard({
   subtext: string;
 }) {
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-      <div className="flex items-center gap-3 mb-2">
+    <div className="card p-3 md:p-4">
+      <div className="flex items-center gap-2 md:gap-3 mb-1 md:mb-2">
         {icon}
-        <span className="text-gray-400">{label}</span>
+        <span className="text-xs md:text-sm dark:text-gray-400 light:text-gray-500">{label}</span>
       </div>
-      <div className="text-2xl font-bold">{value}</div>
-      <div className="text-sm text-gray-500">{subtext}</div>
+      <div className="text-xl md:text-2xl font-bold">{value}</div>
+      <div className="text-xs md:text-sm dark:text-gray-500 light:text-gray-400">{subtext}</div>
+    </div>
+  );
+}
+
+function ChartCard({
+  icon,
+  title,
+  serverIds,
+  metric,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  serverIds: string[];
+  metric: 'cpu' | 'memory' | 'disk';
+}) {
+  return (
+    <div className="card p-3 md:p-4">
+      <div className="flex items-center gap-2 mb-3">
+        {icon}
+        <span className="text-sm font-medium">{title}</span>
+      </div>
+      <AggregatedMetricsChart serverIds={serverIds} metric={metric} height={120} />
     </div>
   );
 }

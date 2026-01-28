@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useStore } from '../stores/useStore';
+import { useMetricsStore } from '../stores/useMetricsStore';
 
 export function useWebSocket() {
   const socketRef = useRef<Socket | null>(null);
   const { updateServerStatus, updateDeploymentStatus, setConnected } = useStore();
+  const { addMetrics } = useMetricsStore();
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) {
@@ -33,6 +35,10 @@ export function useWebSocket() {
         metrics: data.metrics,
         lastSeen: data.timestamp,
       });
+      // Store metrics history for charts
+      if (data.metrics) {
+        addMetrics(data.serverId, data.metrics);
+      }
     });
 
     socket.on('server:connected', (data: { serverId: string }) => {
@@ -52,7 +58,7 @@ export function useWebSocket() {
     });
 
     socketRef.current = socket;
-  }, [updateServerStatus, updateDeploymentStatus, setConnected]);
+  }, [updateServerStatus, updateDeploymentStatus, setConnected, addMetrics]);
 
   const disconnect = useCallback(() => {
     if (socketRef.current) {
