@@ -504,6 +504,57 @@ router.post('/totp/backup-codes', requireAuth, async (req: AuthenticatedRequest,
 });
 
 /**
+ * POST /api/auth/users/:id/totp/reset
+ * Admin reset of user's 2FA (admin only)
+ */
+router.post('/users/:id/totp/reset', requireAuth, (req: AuthenticatedRequest, res) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Admin access required',
+      },
+    });
+  }
+
+  const { id } = req.params;
+
+  // Prevent self-reset via this endpoint (use normal disable for self)
+  if (id === req.user.userId) {
+    return res.status(400).json({
+      error: {
+        code: 'CANNOT_RESET_SELF',
+        message: 'Use the disable endpoint to reset your own 2FA',
+      },
+    });
+  }
+
+  try {
+    const success = authService.resetTotpForUser(id);
+    if (!success) {
+      return res.status(404).json({
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+      });
+    }
+
+    logAudit(req.user.userId, 'totp_reset_by_admin', 'user', id, req.ip, { targetUserId: id });
+
+    res.json({ success: true, message: 'Two-factor authentication has been reset for the user' });
+  } catch (err) {
+    console.error('Admin TOTP reset error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to reset 2FA',
+      },
+    });
+  }
+});
+
+/**
  * POST /api/auth/setup
  * Initial admin user setup (only works if no users exist)
  */

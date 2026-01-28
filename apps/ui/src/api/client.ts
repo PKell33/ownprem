@@ -313,6 +313,13 @@ export const api = {
       method: 'POST',
     });
   },
+
+  // Admin: Reset user's 2FA
+  async resetUserTotp(userId: string) {
+    return fetchWithAuth<{ success: boolean; message: string }>(`${API_BASE}/auth/users/${userId}/totp/reset`, {
+      method: 'POST',
+    });
+  },
 };
 
 // Types
@@ -333,6 +340,7 @@ export interface UserInfo {
   id: string;
   username: string;
   role: string;
+  totp_enabled: boolean;
   created_at: string;
   last_login_at: string | null;
 }

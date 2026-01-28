@@ -298,9 +298,9 @@ class AuthService {
     return user || null;
   }
 
-  listUsers(): Omit<UserRow, 'password_hash'>[] {
+  listUsers(): (Omit<UserRow, 'password_hash' | 'totp_secret' | 'backup_codes'> & { totp_enabled: boolean })[] {
     const db = getDb();
-    return db.prepare('SELECT id, username, role, created_at, last_login_at FROM users ORDER BY created_at').all() as Omit<UserRow, 'password_hash'>[];
+    return db.prepare('SELECT id, username, role, totp_enabled, created_at, last_login_at FROM users ORDER BY created_at').all() as (Omit<UserRow, 'password_hash' | 'totp_secret' | 'backup_codes'> & { totp_enabled: boolean })[];
   }
 
   // TOTP Methods
@@ -457,6 +457,24 @@ class AuthService {
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
+      return false;
+    }
+
+    db.prepare(`
+      UPDATE users
+      SET totp_secret = NULL, totp_enabled = FALSE, backup_codes = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(userId);
+
+    return true;
+  }
+
+  // Admin reset - doesn't require password, just admin permission
+  resetTotpForUser(userId: string): boolean {
+    const db = getDb();
+    const user = db.prepare('SELECT id, totp_enabled FROM users WHERE id = ?').get(userId) as { id: string; totp_enabled: boolean } | undefined;
+
+    if (!user) {
       return false;
     }
 

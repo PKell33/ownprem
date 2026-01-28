@@ -403,6 +403,7 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [resettingTotp, setResettingTotp] = useState<string | null>(null);
 
   const fetchUsers = async () => {
     try {
@@ -431,6 +432,22 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
       setUsers(users.filter(u => u.id !== userId));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete user');
+    }
+  };
+
+  const handleResetTotp = async (userId: string, username: string) => {
+    if (!confirm(`Reset 2FA for user "${username}"? They will need to set up 2FA again on their next login.`)) {
+      return;
+    }
+
+    try {
+      setResettingTotp(userId);
+      await api.resetUserTotp(userId);
+      setUsers(users.map(u => u.id === userId ? { ...u, totp_enabled: false } : u));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to reset 2FA');
+    } finally {
+      setResettingTotp(null);
     }
   };
 
@@ -479,6 +496,7 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
               <tr>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">User</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Role</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">2FA</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Created</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Last Login</th>
                 <th className="px-4 py-3 text-right text-sm font-medium text-gray-300">Actions</th>
@@ -501,6 +519,19 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
                   <td className="px-4 py-3">
                     <RoleBadge role={user.role} />
                   </td>
+                  <td className="px-4 py-3">
+                    {user.totp_enabled ? (
+                      <div className="flex items-center gap-1.5 text-green-400">
+                        <ShieldCheck size={14} />
+                        <span className="text-sm">Enabled</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-gray-500">
+                        <ShieldOff size={14} />
+                        <span className="text-sm">Disabled</span>
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-400 text-sm">
                     {new Date(user.created_at).toLocaleDateString()}
                   </td>
@@ -510,15 +541,31 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
                       : 'Never'}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {user.id !== currentUserId && (
-                      <button
-                        onClick={() => handleDeleteUser(user.id, user.username)}
-                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded transition-colors"
-                        title="Delete user"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
+                    <div className="flex items-center justify-end gap-1">
+                      {user.id !== currentUserId && user.totp_enabled && (
+                        <button
+                          onClick={() => handleResetTotp(user.id, user.username)}
+                          disabled={resettingTotp === user.id}
+                          className="p-2 text-gray-400 hover:text-yellow-400 hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
+                          title="Reset 2FA"
+                        >
+                          {resettingTotp === user.id ? (
+                            <Loader2 size={16} className="animate-spin" />
+                          ) : (
+                            <Key size={16} />
+                          )}
+                        </button>
+                      )}
+                      {user.id !== currentUserId && (
+                        <button
+                          onClick={() => handleDeleteUser(user.id, user.username)}
+                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded transition-colors"
+                          title="Delete user"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
