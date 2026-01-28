@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSystemStatus } from '../hooks/useApi';
 import { useAuthStore } from '../stores/useAuthStore';
 import { api, UserInfo } from '../api/client';
-import { Plus, Trash2, User, Shield, Eye, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, User, Shield, Eye, Wrench, Loader2, AlertCircle } from 'lucide-react';
 
 export default function Settings() {
   const { data: status } = useSystemStatus();
@@ -153,19 +153,7 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {user.role === 'admin' ? (
-                        <>
-                          <Shield size={14} className="text-yellow-500" />
-                          <span className="text-yellow-500">Admin</span>
-                        </>
-                      ) : (
-                        <>
-                          <Eye size={14} className="text-gray-400" />
-                          <span className="text-gray-400">Viewer</span>
-                        </>
-                      )}
-                    </div>
+                    <RoleBadge role={user.role} />
                   </td>
                   <td className="px-4 py-3 text-gray-400 text-sm">
                     {new Date(user.created_at).toLocaleDateString()}
@@ -205,7 +193,7 @@ function CreateUserForm({
 }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'admin' | 'viewer'>('viewer');
+  const [role, setRole] = useState<'admin' | 'operator' | 'viewer'>('viewer');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -267,11 +255,12 @@ function CreateUserForm({
           <label className="block text-sm font-medium text-gray-300 mb-1">Role</label>
           <select
             value={role}
-            onChange={(e) => setRole(e.target.value as 'admin' | 'viewer')}
+            onChange={(e) => setRole(e.target.value as 'admin' | 'operator' | 'viewer')}
             className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="viewer">Viewer</option>
-            <option value="admin">Admin</option>
+            <option value="viewer">Viewer (read only)</option>
+            <option value="operator">Operator (start/stop)</option>
+            <option value="admin">Admin (full access)</option>
           </select>
         </div>
       </div>
@@ -295,6 +284,32 @@ function CreateUserForm({
       </div>
     </form>
   );
+}
+
+function RoleBadge({ role }: { role: string }) {
+  switch (role) {
+    case 'admin':
+      return (
+        <div className="flex items-center gap-2">
+          <Shield size={14} className="text-yellow-500" />
+          <span className="text-yellow-500">Admin</span>
+        </div>
+      );
+    case 'operator':
+      return (
+        <div className="flex items-center gap-2">
+          <Wrench size={14} className="text-blue-400" />
+          <span className="text-blue-400">Operator</span>
+        </div>
+      );
+    default:
+      return (
+        <div className="flex items-center gap-2">
+          <Eye size={14} className="text-gray-400" />
+          <span className="text-gray-400">Viewer</span>
+        </div>
+      );
+  }
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {

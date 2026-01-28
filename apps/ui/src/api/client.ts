@@ -136,7 +136,7 @@ export const api = {
     return fetchWithAuth<UserInfo[]>(`${API_BASE}/auth/users`);
   },
 
-  async createUser(username: string, password: string, role: 'admin' | 'viewer' = 'viewer') {
+  async createUser(username: string, password: string, role: 'admin' | 'operator' | 'viewer' = 'viewer') {
     return fetchWithAuth<UserInfo>(`${API_BASE}/auth/users`, {
       method: 'POST',
       body: JSON.stringify({ username, password, role }),

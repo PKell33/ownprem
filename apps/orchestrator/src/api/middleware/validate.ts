@@ -141,7 +141,7 @@ export const schemas = {
       password: z.string()
         .min(8, 'Password must be at least 8 characters')
         .max(100),
-      role: z.enum(['admin', 'viewer']).optional().default('viewer'),
+      role: z.enum(['admin', 'operator', 'viewer']).optional().default('viewer'),
     }),
   },
 

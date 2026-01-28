@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useApps, useDeployments, useServers, useStartDeployment, useStopDeployment, useRestartDeployment, useUninstallDeployment } from '../hooks/useApi';
+import { useAuthStore } from '../stores/useAuthStore';
 import AppCard from '../components/AppCard';
 import InstallModal from '../components/InstallModal';
 
@@ -8,6 +9,11 @@ export default function Apps() {
   const { data: deployments } = useDeployments();
   const { data: servers } = useServers();
   const [installApp, setInstallApp] = useState<string | null>(null);
+  const { user } = useAuthStore();
+
+  // Role-based permissions
+  const canManage = user?.role === 'admin';
+  const canOperate = user?.role === 'admin' || user?.role === 'operator';
 
   const startMutation = useStartDeployment();
   const stopMutation = useStopDeployment();
@@ -45,6 +51,8 @@ export default function Apps() {
                       key={app.name}
                       app={app}
                       deployment={deployment}
+                      canManage={canManage}
+                      canOperate={canOperate}
                       onInstall={() => setInstallApp(app.name)}
                       onStart={() => deployment && startMutation.mutate(deployment.id)}
                       onStop={() => deployment && stopMutation.mutate(deployment.id)}

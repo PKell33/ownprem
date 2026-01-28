@@ -10,6 +10,8 @@ interface AppCardProps {
   onStop?: () => void;
   onRestart?: () => void;
   onUninstall?: () => void;
+  canManage?: boolean;  // Can install/uninstall (admin only)
+  canOperate?: boolean; // Can start/stop/restart (admin + operator)
 }
 
 const categoryColors: Record<string, string> = {
@@ -28,6 +30,8 @@ export default function AppCard({
   onStop,
   onRestart,
   onUninstall,
+  canManage = true,
+  canOperate = true,
 }: AppCardProps) {
   const isInstalled = !!deployment;
   const isRunning = deployment?.status === 'running';
@@ -76,15 +80,17 @@ export default function AppCard({
       {/* Actions */}
       <div className="px-4 py-3 bg-gray-750 border-t border-gray-700 flex items-center justify-between">
         {!isInstalled ? (
-          <button
-            onClick={onInstall}
-            className="px-4 py-1.5 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded text-sm transition-colors"
-          >
-            Install
-          </button>
+          canManage && (
+            <button
+              onClick={onInstall}
+              className="px-4 py-1.5 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded text-sm transition-colors"
+            >
+              Install
+            </button>
+          )
         ) : (
           <div className="flex items-center gap-2">
-            {canControl && !isRunning && (
+            {canControl && canOperate && !isRunning && (
               <button
                 onClick={onStart}
                 className="p-1.5 hover:bg-gray-700 rounded transition-colors text-green-500"
@@ -93,7 +99,7 @@ export default function AppCard({
                 <Play size={18} />
               </button>
             )}
-            {canControl && isRunning && (
+            {canControl && canOperate && isRunning && (
               <button
                 onClick={onStop}
                 className="p-1.5 hover:bg-gray-700 rounded transition-colors text-yellow-500"
@@ -102,7 +108,7 @@ export default function AppCard({
                 <Square size={18} />
               </button>
             )}
-            {canControl && isRunning && (
+            {canControl && canOperate && isRunning && (
               <button
                 onClick={onRestart}
                 className="p-1.5 hover:bg-gray-700 rounded transition-colors text-blue-500"
@@ -111,7 +117,7 @@ export default function AppCard({
                 <RotateCw size={18} />
               </button>
             )}
-            {canControl && (
+            {canControl && canManage && (
               <button
                 onClick={onUninstall}
                 className="p-1.5 hover:bg-gray-700 rounded transition-colors text-red-500"

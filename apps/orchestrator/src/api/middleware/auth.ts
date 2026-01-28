@@ -109,6 +109,27 @@ export function requireRole(...roles: string[]) {
 }
 
 /**
+ * Role constants for permission checks
+ */
+export const Roles = {
+  ADMIN: 'admin',
+  OPERATOR: 'operator',
+  VIEWER: 'viewer',
+} as const;
+
+/**
+ * Permission levels - which roles can do what
+ */
+export const Permissions = {
+  // Full access (deploy, delete, user management)
+  MANAGE: [Roles.ADMIN],
+  // Can start/stop/restart but not deploy or delete
+  OPERATE: [Roles.ADMIN, Roles.OPERATOR],
+  // Read only
+  VIEW: [Roles.ADMIN, Roles.OPERATOR, Roles.VIEWER],
+} as const;
+
+/**
  * Development mode bypass - allows unauthenticated access in development
  * WARNING: Only use for routes that should be accessible during development
  */

@@ -5,6 +5,7 @@ import { serviceRegistry } from '../../services/serviceRegistry.js';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
+import { requireRole, Permissions } from '../middleware/auth.js';
 import type { AppManifest } from '@nodefoundry/shared';
 
 const router = Router();
@@ -25,8 +26,8 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// POST /api/deployments - Install an app
-router.post('/', validateBody(schemas.deployments.create), async (req, res, next) => {
+// POST /api/deployments - Install an app (admin only)
+router.post('/', requireRole(...Permissions.MANAGE), validateBody(schemas.deployments.create), async (req, res, next) => {
   try {
     const { serverId, appName, config, version } = req.body;
     const deployment = await deployer.install(serverId, appName, config || {}, version);
@@ -96,8 +97,8 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-// PUT /api/deployments/:id - Update deployment config
-router.put('/:id', async (req, res, next) => {
+// PUT /api/deployments/:id - Update deployment config (admin only)
+router.put('/:id', requireRole(...Permissions.MANAGE), async (req, res, next) => {
   try {
     const { config } = req.body;
 
@@ -112,8 +113,8 @@ router.put('/:id', async (req, res, next) => {
   }
 });
 
-// POST /api/deployments/:id/start - Start the app
-router.post('/:id/start', async (req, res, next) => {
+// POST /api/deployments/:id/start - Start the app (admin + operator)
+router.post('/:id/start', requireRole(...Permissions.OPERATE), async (req, res, next) => {
   try {
     const deployment = await deployer.start(req.params.id);
     res.json(deployment);
@@ -122,8 +123,8 @@ router.post('/:id/start', async (req, res, next) => {
   }
 });
 
-// POST /api/deployments/:id/stop - Stop the app
-router.post('/:id/stop', async (req, res, next) => {
+// POST /api/deployments/:id/stop - Stop the app (admin + operator)
+router.post('/:id/stop', requireRole(...Permissions.OPERATE), async (req, res, next) => {
   try {
     const deployment = await deployer.stop(req.params.id);
     res.json(deployment);
@@ -132,8 +133,8 @@ router.post('/:id/stop', async (req, res, next) => {
   }
 });
 
-// POST /api/deployments/:id/restart - Restart the app
-router.post('/:id/restart', async (req, res, next) => {
+// POST /api/deployments/:id/restart - Restart the app (admin + operator)
+router.post('/:id/restart', requireRole(...Permissions.OPERATE), async (req, res, next) => {
   try {
     const deployment = await deployer.restart(req.params.id);
     res.json(deployment);
@@ -142,8 +143,8 @@ router.post('/:id/restart', async (req, res, next) => {
   }
 });
 
-// DELETE /api/deployments/:id - Uninstall the app
-router.delete('/:id', async (req, res, next) => {
+// DELETE /api/deployments/:id - Uninstall the app (admin only)
+router.delete('/:id', requireRole(...Permissions.MANAGE), async (req, res, next) => {
   try {
     await deployer.uninstall(req.params.id);
     res.status(204).send();

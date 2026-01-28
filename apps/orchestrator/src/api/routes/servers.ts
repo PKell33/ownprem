@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
+import { requireRole, Permissions } from '../middleware/auth.js';
 import { hashToken } from '../../websocket/agentHandler.js';
 import type { Server, ServerMetrics } from '@nodefoundry/shared';
 
@@ -45,8 +46,8 @@ router.get('/', (_req, res) => {
   res.json(servers);
 });
 
-// POST /api/servers - Add a new server
-router.post('/', validateBody(schemas.servers.create), (req, res) => {
+// POST /api/servers - Add a new server (admin only)
+router.post('/', requireRole(...Permissions.MANAGE), validateBody(schemas.servers.create), (req, res) => {
   const { name, host } = req.body;
   const db = getDb();
   const id = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -131,8 +132,8 @@ router.put('/:id', (req, res) => {
   res.json(rowToServer(row));
 });
 
-// DELETE /api/servers/:id - Remove server
-router.delete('/:id', (req, res) => {
+// DELETE /api/servers/:id - Remove server (admin only)
+router.delete('/:id', requireRole(...Permissions.MANAGE), (req, res) => {
   const db = getDb();
 
   const existing = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
