@@ -1,14 +1,52 @@
-import { Router } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { deployer } from '../../services/deployer.js';
 import { dependencyResolver } from '../../services/dependencyResolver.js';
 import { serviceRegistry } from '../../services/serviceRegistry.js';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
-import { validateBody, validateParams, schemas } from '../middleware/validate.js';
-import { requireRole, Permissions } from '../middleware/auth.js';
+import { validateBody, schemas } from '../middleware/validate.js';
+import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
+import { authService } from '../../services/authService.js';
 import type { AppManifest } from '@nodefoundry/shared';
 
 const router = Router();
+
+// Helper: Check if user can manage (deploy, delete, configure)
+function canManage(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    return;
+  }
+  // System admins can do everything
+  if (req.user.isSystemAdmin) {
+    next();
+    return;
+  }
+  // TODO: Check group-based admin permission for the deployment's group
+  // For now, only system admins can manage
+  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Admin permission required' } });
+}
+
+// Helper: Check if user can operate (start, stop, restart)
+function canOperate(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    return;
+  }
+  // System admins can do everything
+  if (req.user.isSystemAdmin) {
+    next();
+    return;
+  }
+  // Check if user has operator or admin role in any group
+  const highestRole = authService.getUserHighestRole(req.user.userId);
+  if (highestRole === 'admin' || highestRole === 'operator') {
+    next();
+    return;
+  }
+  // TODO: Check group-based operator permission for the deployment's group
+  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Operator permission required' } });
+}
 
 interface AppRegistryRow {
   name: string;
@@ -16,10 +54,11 @@ interface AppRegistryRow {
 }
 
 // GET /api/deployments - List all deployments
-router.get('/', async (req, res, next) => {
+router.get('/', requireAuth, async (req, res, next) => {
   try {
     const serverId = req.query.serverId as string | undefined;
     const deployments = await deployer.listDeployments(serverId);
+    // TODO: Filter deployments based on user's group memberships
     res.json(deployments);
   } catch (err) {
     next(err);
@@ -27,7 +66,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // POST /api/deployments - Install an app (admin only)
-router.post('/', requireRole(...Permissions.MANAGE), validateBody(schemas.deployments.create), async (req, res, next) => {
+router.post('/', requireAuth, canManage, validateBody(schemas.deployments.create), async (req, res, next) => {
   try {
     const { serverId, appName, config, version } = req.body;
     const deployment = await deployer.install(serverId, appName, config || {}, version);
@@ -38,7 +77,7 @@ router.post('/', requireRole(...Permissions.MANAGE), validateBody(schemas.deploy
 });
 
 // POST /api/deployments/validate - Validate before install
-router.post('/validate', validateBody(schemas.deployments.validate), async (req, res, next) => {
+router.post('/validate', requireAuth, validateBody(schemas.deployments.validate), async (req, res, next) => {
   try {
     const { serverId, appName } = req.body;
 
@@ -77,7 +116,7 @@ router.post('/validate', validateBody(schemas.deployments.validate), async (req,
 });
 
 // GET /api/deployments/:id - Get deployment details
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requireAuth, async (req, res, next) => {
   try {
     const deployment = await deployer.getDeployment(req.params.id);
 
@@ -98,7 +137,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // PUT /api/deployments/:id - Update deployment config (admin only)
-router.put('/:id', requireRole(...Permissions.MANAGE), async (req, res, next) => {
+router.put('/:id', requireAuth, canManage, async (req, res, next) => {
   try {
     const { config } = req.body;
 
@@ -114,7 +153,7 @@ router.put('/:id', requireRole(...Permissions.MANAGE), async (req, res, next) =>
 });
 
 // POST /api/deployments/:id/start - Start the app (admin + operator)
-router.post('/:id/start', requireRole(...Permissions.OPERATE), async (req, res, next) => {
+router.post('/:id/start', requireAuth, canOperate, async (req, res, next) => {
   try {
     const deployment = await deployer.start(req.params.id);
     res.json(deployment);
@@ -124,7 +163,7 @@ router.post('/:id/start', requireRole(...Permissions.OPERATE), async (req, res, 
 });
 
 // POST /api/deployments/:id/stop - Stop the app (admin + operator)
-router.post('/:id/stop', requireRole(...Permissions.OPERATE), async (req, res, next) => {
+router.post('/:id/stop', requireAuth, canOperate, async (req, res, next) => {
   try {
     const deployment = await deployer.stop(req.params.id);
     res.json(deployment);
@@ -134,7 +173,7 @@ router.post('/:id/stop', requireRole(...Permissions.OPERATE), async (req, res, n
 });
 
 // POST /api/deployments/:id/restart - Restart the app (admin + operator)
-router.post('/:id/restart', requireRole(...Permissions.OPERATE), async (req, res, next) => {
+router.post('/:id/restart', requireAuth, canOperate, async (req, res, next) => {
   try {
     const deployment = await deployer.restart(req.params.id);
     res.json(deployment);
@@ -144,7 +183,7 @@ router.post('/:id/restart', requireRole(...Permissions.OPERATE), async (req, res
 });
 
 // DELETE /api/deployments/:id - Uninstall the app (admin only)
-router.delete('/:id', requireRole(...Permissions.MANAGE), async (req, res, next) => {
+router.delete('/:id', requireAuth, canManage, async (req, res, next) => {
   try {
     await deployer.uninstall(req.params.id);
     res.status(204).send();

@@ -1,12 +1,24 @@
-import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
+import { Router, Response, NextFunction } from 'express';
 import { randomBytes } from 'crypto';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
-import { validateBody, validateParams, schemas } from '../middleware/validate.js';
-import { requireRole, Permissions } from '../middleware/auth.js';
+import { validateBody, schemas } from '../middleware/validate.js';
+import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { hashToken } from '../../websocket/agentHandler.js';
 import type { Server, ServerMetrics } from '@nodefoundry/shared';
+
+// Helper: Check if user can manage servers (system admin only for now)
+function canManageServers(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    return;
+  }
+  if (req.user.isSystemAdmin) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'System admin permission required' } });
+}
 
 const router = Router();
 
@@ -39,15 +51,15 @@ function rowToServer(row: ServerRow): Server {
 }
 
 // GET /api/servers - List all servers
-router.get('/', (_req, res) => {
+router.get('/', requireAuth, (_req, res) => {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM servers ORDER BY is_foundry DESC, name').all() as ServerRow[];
   const servers = rows.map(rowToServer);
   res.json(servers);
 });
 
-// POST /api/servers - Add a new server (admin only)
-router.post('/', requireRole(...Permissions.MANAGE), validateBody(schemas.servers.create), (req, res) => {
+// POST /api/servers - Add a new server (system admin only)
+router.post('/', requireAuth, canManageServers, validateBody(schemas.servers.create), (req, res) => {
   const { name, host } = req.body;
   const db = getDb();
   const id = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -81,7 +93,7 @@ router.post('/', requireRole(...Permissions.MANAGE), validateBody(schemas.server
 });
 
 // GET /api/servers/:id - Get server details
-router.get('/:id', (req, res) => {
+router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
 
@@ -92,8 +104,8 @@ router.get('/:id', (req, res) => {
   res.json(rowToServer(row));
 });
 
-// PUT /api/servers/:id - Update server
-router.put('/:id', (req, res) => {
+// PUT /api/servers/:id - Update server (system admin only)
+router.put('/:id', requireAuth, canManageServers, (req, res) => {
   const { name, host } = req.body;
   const db = getDb();
 
@@ -132,8 +144,8 @@ router.put('/:id', (req, res) => {
   res.json(rowToServer(row));
 });
 
-// DELETE /api/servers/:id - Remove server (admin only)
-router.delete('/:id', requireRole(...Permissions.MANAGE), (req, res) => {
+// DELETE /api/servers/:id - Remove server (system admin only)
+router.delete('/:id', requireAuth, canManageServers, (req, res) => {
   const db = getDb();
 
   const existing = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;

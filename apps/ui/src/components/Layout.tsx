@@ -118,7 +118,9 @@ export default function Layout() {
             </div>
             <div className="flex-1 text-left">
               <p className="text-sm font-medium">{user?.username || 'User'}</p>
-              <p className="text-xs dark:text-gray-400 light:text-gray-500">{user?.role || 'admin'}</p>
+              <p className="text-xs dark:text-gray-400 light:text-gray-500">
+                {user?.isSystemAdmin ? 'System Admin' : user?.groups?.[0]?.role || 'User'}
+              </p>
             </div>
             <ChevronUp
               size={16}

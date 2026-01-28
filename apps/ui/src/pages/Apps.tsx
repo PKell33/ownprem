@@ -11,9 +11,18 @@ export default function Apps() {
   const [installApp, setInstallApp] = useState<string | null>(null);
   const { user } = useAuthStore();
 
-  // Role-based permissions
-  const canManage = user?.role === 'admin';
-  const canOperate = user?.role === 'admin' || user?.role === 'operator';
+  // Permission checks - system admin can do everything, otherwise check group roles
+  const getHighestRole = () => {
+    if (!user?.groups?.length) return null;
+    const roles = user.groups.map(g => g.role);
+    if (roles.includes('admin')) return 'admin';
+    if (roles.includes('operator')) return 'operator';
+    return 'viewer';
+  };
+
+  const highestRole = getHighestRole();
+  const canManage = user?.isSystemAdmin || highestRole === 'admin';
+  const canOperate = user?.isSystemAdmin || highestRole === 'admin' || highestRole === 'operator';
 
   const startMutation = useStartDeployment();
   const stopMutation = useStopDeployment();

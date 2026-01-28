@@ -320,13 +320,81 @@ export const api = {
       method: 'POST',
     });
   },
+
+  // Admin: Set system admin status
+  async setSystemAdmin(userId: string, isSystemAdmin: boolean) {
+    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/auth/users/${userId}/system-admin`, {
+      method: 'PUT',
+      body: JSON.stringify({ isSystemAdmin }),
+    });
+  },
+
+  // Groups
+  async getGroups() {
+    return fetchWithAuth<Group[]>(`${API_BASE}/auth/groups`);
+  },
+
+  async getGroup(groupId: string) {
+    return fetchWithAuth<GroupWithMembers>(`${API_BASE}/auth/groups/${groupId}`);
+  },
+
+  async createGroup(name: string, description?: string, totpRequired?: boolean) {
+    return fetchWithAuth<Group>(`${API_BASE}/auth/groups`, {
+      method: 'POST',
+      body: JSON.stringify({ name, description, totpRequired }),
+    });
+  },
+
+  async updateGroup(groupId: string, updates: { name?: string; description?: string; totpRequired?: boolean }) {
+    return fetchWithAuth<Group>(`${API_BASE}/auth/groups/${groupId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  },
+
+  async deleteGroup(groupId: string) {
+    return fetchWithAuth<void>(`${API_BASE}/auth/groups/${groupId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Group membership
+  async addUserToGroup(groupId: string, userId: string, role: 'admin' | 'operator' | 'viewer') {
+    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/auth/groups/${groupId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, role }),
+    });
+  },
+
+  async updateUserGroupRole(groupId: string, userId: string, role: 'admin' | 'operator' | 'viewer') {
+    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/auth/groups/${groupId}/members/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    });
+  },
+
+  async removeUserFromGroup(groupId: string, userId: string) {
+    return fetchWithAuth<void>(`${API_BASE}/auth/groups/${groupId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 // Types
+export interface UserGroupMembership {
+  groupId: string;
+  groupName: string;
+  role: 'admin' | 'operator' | 'viewer';
+  totpRequired: boolean;
+}
+
 export interface User {
   userId: string;
   username: string;
-  role: string;
+  isSystemAdmin: boolean;
+  groups: UserGroupMembership[];
+  totpEnabled?: boolean;
+  totpRequired?: boolean;
 }
 
 export interface AuthResponse {
@@ -334,15 +402,35 @@ export interface AuthResponse {
   refreshToken: string;
   expiresIn: number;
   user: User;
+  totpSetupRequired?: boolean;
 }
 
 export interface UserInfo {
   id: string;
   username: string;
-  role: string;
+  is_system_admin: boolean;
   totp_enabled: boolean;
   created_at: string;
   last_login_at: string | null;
+  groups: UserGroupMembership[];
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  description: string | null;
+  totp_required: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GroupWithMembers extends Group {
+  members: Array<{
+    userId: string;
+    username: string;
+    role: 'admin' | 'operator' | 'viewer';
+    isSystemAdmin: boolean;
+  }>;
 }
 
 export interface Server {

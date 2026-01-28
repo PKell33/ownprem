@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import { useSystemStatus } from '../hooks/useApi';
 import { useAuthStore } from '../stores/useAuthStore';
 import { api, UserInfo, AuditLogEntry, SessionInfo, TotpStatus } from '../api/client';
-import { Plus, Trash2, User, Shield, Eye, Wrench, Loader2, AlertCircle, ScrollText, ChevronLeft, ChevronRight, Filter, Monitor, Smartphone, Globe, LogOut, XCircle, Lock, Key, Copy, Check, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Plus, Trash2, User, Shield, Loader2, AlertCircle, ScrollText, ChevronLeft, ChevronRight, Filter, Monitor, Smartphone, Globe, LogOut, XCircle, Lock, Key, Copy, Check, ShieldCheck, ShieldOff } from 'lucide-react';
 
 export default function Settings() {
   const { data: status } = useSystemStatus();
   const { user: currentUser } = useAuthStore();
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = currentUser?.isSystemAdmin;
 
   return (
     <div className="space-y-8">
@@ -495,7 +495,7 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
             <thead className="bg-gray-700/50">
               <tr>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">User</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Role</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Access</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">2FA</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Created</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">Last Login</th>
@@ -517,7 +517,25 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <RoleBadge role={user.role} />
+                    {user.is_system_admin ? (
+                      <div className="flex items-center gap-2">
+                        <Shield size={14} className="text-yellow-500" />
+                        <span className="text-yellow-500">System Admin</span>
+                      </div>
+                    ) : user.groups?.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {user.groups.slice(0, 2).map(g => (
+                          <span key={g.groupId} className="text-xs px-2 py-0.5 rounded bg-gray-700">
+                            {g.groupName}: {g.role}
+                          </span>
+                        ))}
+                        {user.groups.length > 2 && (
+                          <span className="text-xs text-gray-500">+{user.groups.length - 2}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-500 text-sm">No groups</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {user.totp_enabled ? (
@@ -1080,31 +1098,6 @@ function AuditLog() {
   );
 }
 
-function RoleBadge({ role }: { role: string }) {
-  switch (role) {
-    case 'admin':
-      return (
-        <div className="flex items-center gap-2">
-          <Shield size={14} className="text-yellow-500" />
-          <span className="text-yellow-500">Admin</span>
-        </div>
-      );
-    case 'operator':
-      return (
-        <div className="flex items-center gap-2">
-          <Wrench size={14} className="text-blue-400" />
-          <span className="text-blue-400">Operator</span>
-        </div>
-      );
-    default:
-      return (
-        <div className="flex items-center gap-2">
-          <Eye size={14} className="text-gray-400" />
-          <span className="text-gray-400">Viewer</span>
-        </div>
-      );
-  }
-}
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (

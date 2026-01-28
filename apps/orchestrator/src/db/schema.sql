@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS deployments (
     id TEXT PRIMARY KEY,
     server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     app_name TEXT NOT NULL REFERENCES app_registry(name),
+    group_id TEXT REFERENCES groups(id) ON DELETE SET NULL,
     version TEXT NOT NULL,
     config JSON NOT NULL,
     status TEXT DEFAULT 'pending',
@@ -34,6 +35,8 @@ CREATE TABLE IF NOT EXISTS deployments (
 
     UNIQUE(server_id, app_name)
 );
+
+CREATE INDEX IF NOT EXISTS idx_deployments_group ON deployments(group_id);
 
 -- Secrets (encrypted)
 CREATE TABLE IF NOT EXISTS secrets (
@@ -87,7 +90,7 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    role TEXT DEFAULT 'admin',
+    is_system_admin BOOLEAN DEFAULT FALSE,
     totp_secret TEXT,
     totp_enabled BOOLEAN DEFAULT FALSE,
     backup_codes TEXT,
@@ -95,6 +98,28 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_login_at TIMESTAMP
 );
+
+-- Groups for organizing users and apps
+CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    totp_required BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User-Group membership with role
+CREATE TABLE IF NOT EXISTS user_groups (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'viewer',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_groups_user ON user_groups(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_groups_group ON user_groups(group_id);
 
 -- Refresh tokens / sessions for JWT
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -140,3 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
 -- Initialize foundry server on first run
 INSERT OR IGNORE INTO servers (id, name, is_foundry, agent_status)
 VALUES ('foundry', 'foundry', TRUE, 'offline');
+
+-- Initialize default group on first run
+INSERT OR IGNORE INTO groups (id, name, description, totp_required)
+VALUES ('default', 'Default', 'Default group for all users and apps', FALSE);
