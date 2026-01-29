@@ -15,6 +15,7 @@ interface ServerCardProps {
 export default function ServerCard({ server, deploymentCount = 0, onClick, onDelete, onSetup, canManage = false }: ServerCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReconnect, setConfirmReconnect] = useState(false);
   const metrics = server.metrics;
   const isOffline = server.agentStatus === 'offline';
 
@@ -26,12 +27,20 @@ export default function ServerCard({ server, deploymentCount = 0, onClick, onDel
       setShowMenu(false);
     } else {
       setConfirmDelete(true);
+      setConfirmReconnect(false);
     }
   };
 
   const handleSetup = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // For online servers, require confirmation since it will disconnect the agent
+    if (!isOffline && !confirmReconnect) {
+      setConfirmReconnect(true);
+      setConfirmDelete(false);
+      return;
+    }
     onSetup?.();
+    setConfirmReconnect(false);
     setShowMenu(false);
   };
 
@@ -63,6 +72,7 @@ export default function ServerCard({ server, deploymentCount = 0, onClick, onDel
                   e.stopPropagation();
                   setShowMenu(!showMenu);
                   setConfirmDelete(false);
+                  setConfirmReconnect(false);
                 }}
                 className="p-1 rounded hover:bg-gray-700 dark:hover:bg-gray-700 light:hover:bg-gray-200 transition-colors"
               >
@@ -76,6 +86,7 @@ export default function ServerCard({ server, deploymentCount = 0, onClick, onDel
                       e.stopPropagation();
                       setShowMenu(false);
                       setConfirmDelete(false);
+                      setConfirmReconnect(false);
                     }}
                   />
                   <div className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg shadow-lg min-w-[160px]
@@ -83,12 +94,16 @@ export default function ServerCard({ server, deploymentCount = 0, onClick, onDel
                     light:bg-white light:border light:border-gray-200">
                     <button
                       onClick={handleSetup}
-                      className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
-                        dark:text-gray-300 dark:hover:bg-gray-700
-                        light:text-gray-700 light:hover:bg-gray-100"
+                      className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
+                        ${confirmReconnect
+                          ? 'text-yellow-500 hover:bg-yellow-500/10'
+                          : 'dark:text-gray-300 dark:hover:bg-gray-700 light:text-gray-700 light:hover:bg-gray-100'
+                        }`}
                     >
                       <Terminal size={14} />
-                      {isOffline ? 'Connect Server' : 'Reconnect Server'}
+                      {confirmReconnect
+                        ? 'Confirm (will disconnect agent)'
+                        : isOffline ? 'Connect Server' : 'Reconnect Server'}
                     </button>
                     <button
                       onClick={handleDelete}
