@@ -1,9 +1,13 @@
 import { Router, Response } from 'express';
+import { z } from 'zod';
 import { getDb } from '../../db/index.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
-import { paginateQuery } from '../../lib/pagination.js';
+import { validateParams, validateQuery, schemas } from '../middleware/validate.js';
 
 const router = Router();
+
+// Infer the validated query type from the schema
+type CommandsQuery = z.infer<typeof schemas.query.commands>;
 
 interface CommandLogRow {
   id: string;
@@ -29,8 +33,8 @@ interface CommandLogRow {
  * - limit: Number of results (default 100)
  * - offset: Pagination offset (default 0)
  */
-router.get('/', (req: AuthenticatedRequest, res: Response) => {
-  const { serverId, deploymentId, action, status, limit, offset } = req.query;
+router.get('/', validateQuery(schemas.query.commands), (req: AuthenticatedRequest, res: Response) => {
+  const { serverId, deploymentId, action, status, limit, offset } = req.query as unknown as CommandsQuery;
 
   const db = getDb();
   const conditions: string[] = [];
@@ -58,9 +62,9 @@ router.get('/', (req: AuthenticatedRequest, res: Response) => {
   // Get total count
   const countRow = db.prepare(`SELECT COUNT(*) as count FROM command_log cl ${whereClause}`).get(...params) as { count: number };
 
-  // Get paginated results
-  const queryLimit = Math.min(parseInt(limit as string) || 100, 500);
-  const queryOffset = parseInt(offset as string) || 0;
+  // Use validated query params (with defaults from schema)
+  const queryLimit = limit;
+  const queryOffset = offset;
 
   const rows = db.prepare(`
     SELECT cl.*, s.name as server_name, d.app_name
@@ -103,7 +107,7 @@ router.get('/', (req: AuthenticatedRequest, res: Response) => {
  * GET /api/commands/:id
  * Get a specific command by ID.
  */
-router.get('/:id', (req: AuthenticatedRequest, res: Response) => {
+router.get('/:id', validateParams(schemas.idParam), (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const db = getDb();
 

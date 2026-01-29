@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS secrets (
     deployment_id TEXT PRIMARY KEY REFERENCES deployments(id) ON DELETE CASCADE,
     data TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    rotated_at TIMESTAMP
 );
 
 -- Service registry
@@ -158,12 +159,15 @@ CREATE TABLE IF NOT EXISTS agent_tokens (
     id TEXT PRIMARY KEY,
     server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     token_hash TEXT NOT NULL UNIQUE,
+    name TEXT,
+    expires_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_used_at TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_tokens_server ON agent_tokens(server_id);
 CREATE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_agent_tokens_expires ON agent_tokens(expires_at);
 
 -- Audit log for security
 CREATE TABLE IF NOT EXISTS audit_log (

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authService } from '../../services/authService.js';
 import { csrfService } from '../../services/csrfService.js';
 import { requireAuth, devBypassAuth, AuthenticatedRequest } from '../middleware/auth.js';
-import { validateBody, schemas } from '../middleware/validate.js';
+import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 
@@ -345,7 +345,7 @@ router.post('/sessions/current', requireAuth, (req: AuthenticatedRequest, res) =
  * DELETE /api/auth/sessions/:id
  * Revoke a specific session
  */
-router.delete('/sessions/:id', requireAuth, (req: AuthenticatedRequest, res) => {
+router.delete('/sessions/:id', requireAuth, validateParams(schemas.idParam), (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params;
     const revoked = authService.revokeSession(req.user!.userId, id);
@@ -376,18 +376,9 @@ router.delete('/sessions/:id', requireAuth, (req: AuthenticatedRequest, res) => 
  * POST /api/auth/sessions/revoke-others
  * Revoke all sessions except the current one
  */
-router.post('/sessions/revoke-others', requireAuth, (req: AuthenticatedRequest, res) => {
+router.post('/sessions/revoke-others', requireAuth, validateBody(schemas.auth.sessionRevoke), (req: AuthenticatedRequest, res) => {
   try {
     const { refreshToken } = req.body;
-
-    if (!refreshToken) {
-      return res.status(400).json({
-        error: {
-          code: 'MISSING_TOKEN',
-          message: 'Current refresh token required',
-        },
-      });
-    }
 
     const currentTokenHash = authService.getTokenHashFromRefreshToken(refreshToken);
     const revokedCount = authService.revokeOtherSessions(req.user!.userId, currentTokenHash);
@@ -400,6 +391,56 @@ router.post('/sessions/revoke-others', requireAuth, (req: AuthenticatedRequest, 
       error: {
         code: 'INTERNAL_ERROR',
         message: 'Failed to revoke sessions',
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/auth/sessions/revoke-all
+ * Revoke all sessions including the current one (force logout everywhere)
+ */
+router.post('/sessions/revoke-all', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    await authService.revokeAllUserTokens(req.user!.userId);
+
+    logAudit(req.user!.userId, 'sessions_revoked', 'session', 'all', req.ip, {});
+    res.json({ success: true, message: 'All sessions revoked. Please log in again.' });
+  } catch (err) {
+    console.error('Revoke all sessions error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to revoke sessions',
+      },
+    });
+  }
+});
+
+/**
+ * GET /api/auth/sessions/active
+ * Get the count of active sessions across all users (system admin only)
+ */
+router.get('/sessions/active', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    // Import dynamically to avoid circular dependencies
+    const { getActiveSessionCount } = await import('../../jobs/sessionCleanup.js');
+
+    if (req.user?.isSystemAdmin) {
+      // System admin gets total count
+      const count = getActiveSessionCount();
+      res.json({ activeSessionCount: count });
+    } else {
+      // Regular user gets their own session count
+      const sessions = authService.getUserSessions(req.user!.userId);
+      res.json({ activeSessionCount: sessions.length });
+    }
+  } catch (err) {
+    console.error('Get active sessions error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to get session count',
       },
     });
   }
@@ -568,7 +609,7 @@ router.post('/totp/backup-codes', requireAuth, async (req: AuthenticatedRequest,
  * POST /api/auth/users/:id/totp/reset
  * Admin reset of user's 2FA (system admin only)
  */
-router.post('/users/:id/totp/reset', requireAuth, (req: AuthenticatedRequest, res) => {
+router.post('/users/:id/totp/reset', requireAuth, validateParams(schemas.idParam), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -732,7 +773,7 @@ router.post('/users', requireAuth, validateBody(schemas.auth.createUser), async 
  * DELETE /api/auth/users/:id
  * Delete a user (system admin only, cannot delete self)
  */
-router.delete('/users/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+router.delete('/users/:id', requireAuth, validateParams(schemas.idParam), async (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -812,7 +853,7 @@ router.get('/groups', requireAuth, (req: AuthenticatedRequest, res) => {
  * POST /api/auth/groups
  * Create a new group (system admin only)
  */
-router.post('/groups', requireAuth, (req: AuthenticatedRequest, res) => {
+router.post('/groups', requireAuth, validateBody(schemas.groups.create), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -824,15 +865,6 @@ router.post('/groups', requireAuth, (req: AuthenticatedRequest, res) => {
 
   try {
     const { name, description, totpRequired } = req.body;
-
-    if (!name || typeof name !== 'string' || name.length < 2) {
-      return res.status(400).json({
-        error: {
-          code: 'INVALID_NAME',
-          message: 'Group name must be at least 2 characters',
-        },
-      });
-    }
 
     const groupId = authService.createGroup(name, description, totpRequired || false);
 
@@ -863,7 +895,7 @@ router.post('/groups', requireAuth, (req: AuthenticatedRequest, res) => {
  * GET /api/auth/groups/:id
  * Get a specific group with members (system admin only)
  */
-router.get('/groups/:id', requireAuth, (req: AuthenticatedRequest, res) => {
+router.get('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -893,7 +925,7 @@ router.get('/groups/:id', requireAuth, (req: AuthenticatedRequest, res) => {
  * PUT /api/auth/groups/:id
  * Update a group (system admin only)
  */
-router.put('/groups/:id', requireAuth, (req: AuthenticatedRequest, res) => {
+router.put('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), validateBody(schemas.groups.update), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -944,7 +976,7 @@ router.put('/groups/:id', requireAuth, (req: AuthenticatedRequest, res) => {
  * DELETE /api/auth/groups/:id
  * Delete a group (system admin only)
  */
-router.delete('/groups/:id', requireAuth, (req: AuthenticatedRequest, res) => {
+router.delete('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -1007,7 +1039,7 @@ router.delete('/groups/:id', requireAuth, (req: AuthenticatedRequest, res) => {
  * POST /api/auth/groups/:id/members
  * Add a user to a group (system admin only)
  */
-router.post('/groups/:id/members', requireAuth, (req: AuthenticatedRequest, res) => {
+router.post('/groups/:id/members', requireAuth, validateParams(schemas.groupIdParam), validateBody(schemas.groups.addMember), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -1020,15 +1052,6 @@ router.post('/groups/:id/members', requireAuth, (req: AuthenticatedRequest, res)
   try {
     const { id: groupId } = req.params;
     const { userId, role } = req.body;
-
-    if (!userId || !role || !['admin', 'operator', 'viewer'].includes(role)) {
-      return res.status(400).json({
-        error: {
-          code: 'INVALID_REQUEST',
-          message: 'userId and role (admin/operator/viewer) are required',
-        },
-      });
-    }
 
     const group = authService.getGroup(groupId);
     if (!group) {
@@ -1070,7 +1093,7 @@ router.post('/groups/:id/members', requireAuth, (req: AuthenticatedRequest, res)
  * PUT /api/auth/groups/:id/members/:userId
  * Update a user's role in a group (system admin only)
  */
-router.put('/groups/:id/members/:userId', requireAuth, (req: AuthenticatedRequest, res) => {
+router.put('/groups/:id/members/:userId', requireAuth, validateParams(schemas.groupMemberParams), validateBody(schemas.groups.updateMember), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -1083,15 +1106,6 @@ router.put('/groups/:id/members/:userId', requireAuth, (req: AuthenticatedReques
   try {
     const { id: groupId, userId } = req.params;
     const { role } = req.body;
-
-    if (!role || !['admin', 'operator', 'viewer'].includes(role)) {
-      return res.status(400).json({
-        error: {
-          code: 'INVALID_ROLE',
-          message: 'Role must be admin, operator, or viewer',
-        },
-      });
-    }
 
     const success = authService.updateUserGroupRole(userId, groupId, role);
     if (!success) {
@@ -1121,7 +1135,7 @@ router.put('/groups/:id/members/:userId', requireAuth, (req: AuthenticatedReques
  * DELETE /api/auth/groups/:id/members/:userId
  * Remove a user from a group (system admin only)
  */
-router.delete('/groups/:id/members/:userId', requireAuth, (req: AuthenticatedRequest, res) => {
+router.delete('/groups/:id/members/:userId', requireAuth, validateParams(schemas.groupMemberParams), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {
@@ -1162,7 +1176,7 @@ router.delete('/groups/:id/members/:userId', requireAuth, (req: AuthenticatedReq
  * PUT /api/auth/users/:id/system-admin
  * Set/unset system admin flag (system admin only)
  */
-router.put('/users/:id/system-admin', requireAuth, (req: AuthenticatedRequest, res) => {
+router.put('/users/:id/system-admin', requireAuth, validateParams(schemas.idParam), validateBody(schemas.auth.setSystemAdmin), (req: AuthenticatedRequest, res) => {
   if (!req.user?.isSystemAdmin) {
     return res.status(403).json({
       error: {

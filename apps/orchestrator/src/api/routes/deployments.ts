@@ -1,15 +1,19 @@
 import { Router, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { deployer } from '../../services/deployer.js';
 import { dependencyResolver } from '../../services/dependencyResolver.js';
 import { serviceRegistry } from '../../services/serviceRegistry.js';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
-import { validateBody, schemas } from '../middleware/validate.js';
+import { validateBody, validateParams, validateQuery, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { authService } from '../../services/authService.js';
 import { requestLogs } from '../../websocket/agentHandler.js';
 import { parsePaginationParams, paginateOrReturnAll } from '../../lib/pagination.js';
 import type { AppManifest } from '@ownprem/shared';
+
+// Infer the validated query type from the schema
+type LogsQuery = z.infer<typeof schemas.query.logs>;
 
 const router = Router();
 
@@ -176,7 +180,7 @@ router.post('/validate', requireAuth, validateBody(schemas.deployments.validate)
 });
 
 // GET /api/deployments/:id - Get deployment details (only if user has access to the group)
-router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+router.get('/:id', requireAuth, validateParams(schemas.idParam), async (req: AuthenticatedRequest, res, next) => {
   try {
     const deployment = await deployer.getDeployment(req.params.id);
 
@@ -206,7 +210,7 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res, next) => 
 });
 
 // PUT /api/deployments/:id - Update deployment config (admin for the group)
-router.put('/:id', requireAuth, canManageDeployment, async (req, res, next) => {
+router.put('/:id', requireAuth, validateParams(schemas.idParam), canManageDeployment, validateBody(schemas.deployments.update), async (req, res, next) => {
   try {
     const { config } = req.body;
 
@@ -222,7 +226,7 @@ router.put('/:id', requireAuth, canManageDeployment, async (req, res, next) => {
 });
 
 // POST /api/deployments/:id/start - Start the app (admin or operator for the group)
-router.post('/:id/start', requireAuth, canOperateDeployment, async (req, res, next) => {
+router.post('/:id/start', requireAuth, validateParams(schemas.idParam), canOperateDeployment, async (req, res, next) => {
   try {
     const deployment = await deployer.start(req.params.id);
     res.json(deployment);
@@ -232,7 +236,7 @@ router.post('/:id/start', requireAuth, canOperateDeployment, async (req, res, ne
 });
 
 // POST /api/deployments/:id/stop - Stop the app (admin or operator for the group)
-router.post('/:id/stop', requireAuth, canOperateDeployment, async (req, res, next) => {
+router.post('/:id/stop', requireAuth, validateParams(schemas.idParam), canOperateDeployment, async (req, res, next) => {
   try {
     const deployment = await deployer.stop(req.params.id);
     res.json(deployment);
@@ -242,7 +246,7 @@ router.post('/:id/stop', requireAuth, canOperateDeployment, async (req, res, nex
 });
 
 // POST /api/deployments/:id/restart - Restart the app (admin or operator for the group)
-router.post('/:id/restart', requireAuth, canOperateDeployment, async (req, res, next) => {
+router.post('/:id/restart', requireAuth, validateParams(schemas.idParam), canOperateDeployment, async (req, res, next) => {
   try {
     const deployment = await deployer.restart(req.params.id);
     res.json(deployment);
@@ -252,7 +256,7 @@ router.post('/:id/restart', requireAuth, canOperateDeployment, async (req, res, 
 });
 
 // GET /api/deployments/:id/logs - Get logs for the app (admin or operator for the group)
-router.get('/:id/logs', requireAuth, canOperateDeployment, async (req: AuthenticatedRequest, res, next) => {
+router.get('/:id/logs', requireAuth, validateParams(schemas.idParam), validateQuery(schemas.query.logs), canOperateDeployment, async (req: AuthenticatedRequest, res, next) => {
   try {
     const deployment = await deployer.getDeployment(req.params.id);
     if (!deployment) {
@@ -264,10 +268,8 @@ router.get('/:id/logs', requireAuth, canOperateDeployment, async (req: Authentic
     const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(deployment.appName) as AppRegistryRow | undefined;
     const manifest = appRow ? JSON.parse(appRow.manifest) as AppManifest : null;
 
-    // Parse query params
-    const lines = Math.min(parseInt(req.query.lines as string) || 100, 1000);
-    const since = req.query.since as string | undefined;
-    const grep = req.query.grep as string | undefined;
+    // Use validated query params (with defaults from schema)
+    const { lines, since, grep } = req.query as unknown as LogsQuery;
 
     // Request logs from the agent
     const result = await requestLogs(deployment.serverId, deployment.appName, {
@@ -293,7 +295,7 @@ router.get('/:id/logs', requireAuth, canOperateDeployment, async (req: Authentic
 });
 
 // DELETE /api/deployments/:id - Uninstall the app (admin for the group)
-router.delete('/:id', requireAuth, canManageDeployment, async (req, res, next) => {
+router.delete('/:id', requireAuth, validateParams(schemas.idParam), canManageDeployment, async (req, res, next) => {
   try {
     await deployer.uninstall(req.params.id);
     res.status(204).send();
@@ -302,8 +304,35 @@ router.delete('/:id', requireAuth, canManageDeployment, async (req, res, next) =
   }
 });
 
+// POST /api/deployments/:id/rotate-secrets - Rotate secrets and reconfigure (admin for the group)
+router.post('/:id/rotate-secrets', requireAuth, validateParams(schemas.idParam), validateBody(schemas.deployments.rotateSecrets), canManageDeployment, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { secretsRotationService } = await import('../../services/secretsRotation.js');
+    const { fields } = req.body;
+
+    const result = await secretsRotationService.rotateAndReconfigure(
+      req.params.id,
+      fields,
+      req.user?.userId
+    );
+
+    if (!result.success) {
+      throw createError(result.error || 'Failed to rotate secrets', 400, 'ROTATION_FAILED');
+    }
+
+    res.json({
+      success: true,
+      deploymentId: result.deploymentId,
+      rotatedFields: result.rotatedFields,
+      message: `Successfully rotated ${result.rotatedFields.length} secret(s). Deployment is being reconfigured.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/deployments/:id/connection-info - Get connection details and credentials
-router.get('/:id/connection-info', requireAuth, canManageDeployment, async (req: AuthenticatedRequest, res, next) => {
+router.get('/:id/connection-info', requireAuth, validateParams(schemas.idParam), canManageDeployment, async (req: AuthenticatedRequest, res, next) => {
   try {
     const deployment = await deployer.getDeployment(req.params.id);
     if (!deployment) {

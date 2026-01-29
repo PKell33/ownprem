@@ -89,20 +89,106 @@ export function validateQuery<T>(schema: ZodSchema<T>) {
 // UUID pattern for IDs
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Server/resource ID pattern (lowercase alphanumeric with hyphens)
+const resourceIdPattern = /^[a-z0-9-]+$/;
+
 export const schemas = {
-  // Common ID param
+  // ===============================
+  // Common Parameter Schemas
+  // ===============================
+
+  // UUID ID param (for deployments, sessions, etc.)
   idParam: z.object({
     id: z.string().regex(uuidPattern, 'Invalid ID format'),
   }),
 
-  // Server name param
-  serverNameParam: z.object({
-    id: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'Server ID must be lowercase alphanumeric with hyphens'),
+  // Server ID param (not UUID, uses name-based IDs like 'core')
+  serverIdParam: z.object({
+    id: z.string().min(1).max(50).regex(resourceIdPattern, 'Server ID must be lowercase alphanumeric with hyphens'),
   }),
 
   // App name param
   appNameParam: z.object({
-    name: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'App name must be lowercase alphanumeric with hyphens'),
+    name: z.string().min(1).max(50).regex(resourceIdPattern, 'App name must be lowercase alphanumeric with hyphens'),
+  }),
+
+  // Service name param
+  serviceNameParam: z.object({
+    name: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Service name must be lowercase alphanumeric with hyphens'),
+  }),
+
+  // User ID param (UUID)
+  userIdParam: z.object({
+    userId: z.string().regex(uuidPattern, 'Invalid user ID format'),
+  }),
+
+  // Group ID param (UUID or 'default')
+  groupIdParam: z.object({
+    id: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'Group ID must be lowercase alphanumeric with hyphens'),
+  }),
+
+  // Combined params for nested routes (e.g., /groups/:id/members/:userId)
+  groupMemberParams: z.object({
+    id: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'Group ID must be lowercase alphanumeric with hyphens'),
+    userId: z.string().regex(uuidPattern, 'Invalid user ID format'),
+  }),
+
+  // Token ID param (UUID)
+  tokenIdParam: z.object({
+    tokenId: z.string().regex(uuidPattern, 'Invalid token ID format'),
+  }),
+
+  // Server with token params
+  serverTokenParams: z.object({
+    id: z.string().min(1).max(50).regex(resourceIdPattern, 'Server ID must be lowercase alphanumeric with hyphens'),
+    tokenId: z.string().regex(uuidPattern, 'Invalid token ID format'),
+  }),
+
+  // ===============================
+  // Common Query Schemas
+  // ===============================
+  query: {
+    // Pagination query params
+    pagination: z.object({
+      limit: z.coerce.number().int().min(1).max(500).optional().default(100),
+      offset: z.coerce.number().int().min(0).optional().default(0),
+    }),
+
+    // Logs query params
+    logs: z.object({
+      lines: z.coerce.number().int().min(1).max(1000).optional().default(100),
+      since: z.string().max(50).optional(),
+      grep: z.string().max(100).optional(),
+    }),
+
+    // Command log query params
+    commands: z.object({
+      serverId: z.string().min(1).max(50).regex(resourceIdPattern).optional(),
+      deploymentId: z.string().regex(uuidPattern).optional(),
+      action: z.string().min(1).max(50).optional(),
+      status: z.enum(['pending', 'success', 'error', 'timeout']).optional(),
+      limit: z.coerce.number().int().min(1).max(500).optional().default(100),
+      offset: z.coerce.number().int().min(0).optional().default(0),
+    }),
+
+    // Audit log query params
+    audit: z.object({
+      action: z.string().min(1).max(100).optional(),
+      limit: z.coerce.number().int().min(1).max(500).optional().default(100),
+      offset: z.coerce.number().int().min(0).optional().default(0),
+    }),
+
+    // Deployments list query params
+    deployments: z.object({
+      serverId: z.string().min(1).max(50).regex(resourceIdPattern).optional(),
+      limit: z.coerce.number().int().min(1).max(500).optional(),
+      offset: z.coerce.number().int().min(0).optional(),
+    }),
+  },
+
+  // Legacy alias for backward compatibility
+  serverNameParam: z.object({
+    id: z.string().min(1).max(50).regex(resourceIdPattern, 'Server ID must be lowercase alphanumeric with hyphens'),
   }),
 
   // Auth schemas
@@ -159,6 +245,47 @@ export const schemas = {
     totpDisable: z.object({
       password: z.string().min(1, 'Password is required'),
     }),
+
+    // Session schemas
+    sessionRevoke: z.object({
+      refreshToken: z.string().min(1, 'Refresh token is required'),
+    }),
+
+    // System admin schema
+    setSystemAdmin: z.object({
+      isSystemAdmin: z.boolean(),
+    }),
+  },
+
+  // Group schemas
+  groups: {
+    create: z.object({
+      name: z.string()
+        .min(2, 'Group name must be at least 2 characters')
+        .max(50)
+        .regex(/^[a-zA-Z0-9_-]+$/, 'Group name can only contain letters, numbers, underscores, and hyphens'),
+      description: z.string().max(200).optional(),
+      totpRequired: z.boolean().optional(),
+    }),
+
+    update: z.object({
+      name: z.string()
+        .min(2, 'Group name must be at least 2 characters')
+        .max(50)
+        .regex(/^[a-zA-Z0-9_-]+$/, 'Group name can only contain letters, numbers, underscores, and hyphens')
+        .optional(),
+      description: z.string().max(200).optional(),
+      totpRequired: z.boolean().optional(),
+    }),
+
+    addMember: z.object({
+      userId: z.string().regex(uuidPattern, 'Invalid user ID format'),
+      role: z.enum(['admin', 'operator', 'viewer']),
+    }),
+
+    updateMember: z.object({
+      role: z.enum(['admin', 'operator', 'viewer']),
+    }),
   },
 
   // Server schemas
@@ -209,6 +336,20 @@ export const schemas = {
       appName: z.string()
         .min(1, 'App name is required')
         .regex(/^[a-z0-9-]+$/, 'App name must be lowercase alphanumeric with hyphens'),
+    }),
+
+    rotateSecrets: z.object({
+      fields: z.array(z.string().min(1).max(100)).optional(),
+    }),
+  },
+
+  // Agent token schemas
+  agentTokens: {
+    create: z.object({
+      name: z.string().min(1).max(100).optional(),
+      expiresIn: z.string()
+        .regex(/^\d+[smhd]$/, 'Invalid duration format (e.g., "30d", "24h", "1h")')
+        .optional(),
     }),
   },
 };

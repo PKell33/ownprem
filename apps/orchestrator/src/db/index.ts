@@ -29,8 +29,39 @@ export function initDb(): Database.Database {
   const schema = readFileSync(schemaPath, 'utf-8');
   db.exec(schema);
 
+  // Run migrations for schema changes
+  runMigrations(db);
+
   console.log(`Database initialized at ${config.database.path}`);
   return db;
+}
+
+/**
+ * Run database migrations for schema changes.
+ * Each migration is idempotent and checks if it needs to be applied.
+ */
+function runMigrations(database: Database.Database): void {
+  // Migration 1: Add rotated_at column to secrets table
+  const secretsColumns = database.prepare("PRAGMA table_info(secrets)").all() as { name: string }[];
+  const hasRotatedAt = secretsColumns.some(col => col.name === 'rotated_at');
+  if (!hasRotatedAt) {
+    database.exec('ALTER TABLE secrets ADD COLUMN rotated_at TIMESTAMP');
+    console.log('Migration: Added rotated_at column to secrets table');
+  }
+
+  // Migration 2: Add name and expires_at columns to agent_tokens table
+  const agentTokensColumns = database.prepare("PRAGMA table_info(agent_tokens)").all() as { name: string }[];
+  const hasTokenName = agentTokensColumns.some(col => col.name === 'name');
+  if (!hasTokenName) {
+    database.exec('ALTER TABLE agent_tokens ADD COLUMN name TEXT');
+    console.log('Migration: Added name column to agent_tokens table');
+  }
+  const hasExpiresAt = agentTokensColumns.some(col => col.name === 'expires_at');
+  if (!hasExpiresAt) {
+    database.exec('ALTER TABLE agent_tokens ADD COLUMN expires_at TIMESTAMP');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_agent_tokens_expires ON agent_tokens(expires_at)');
+    console.log('Migration: Added expires_at column to agent_tokens table');
+  }
 }
 
 export function closeDb(): void {

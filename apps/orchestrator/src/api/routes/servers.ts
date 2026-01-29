@@ -2,7 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { randomBytes } from 'crypto';
 import { getDb } from '../../db/index.js';
 import { createError } from '../middleware/error.js';
-import { validateBody, schemas } from '../middleware/validate.js';
+import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { hashToken } from '../../websocket/agentHandler.js';
 import { parsePaginationParams, paginateOrReturnAll } from '../../lib/pagination.js';
@@ -97,7 +97,7 @@ router.post('/', requireAuth, canManageServers, validateBody(schemas.servers.cre
 });
 
 // GET /api/servers/:id - Get server details
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, validateParams(schemas.serverIdParam), (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
 
@@ -109,7 +109,7 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // PUT /api/servers/:id - Update server (system admin only)
-router.put('/:id', requireAuth, canManageServers, (req, res) => {
+router.put('/:id', requireAuth, canManageServers, validateParams(schemas.serverIdParam), validateBody(schemas.servers.update), (req, res) => {
   const { name, host } = req.body;
   const db = getDb();
 
@@ -149,7 +149,7 @@ router.put('/:id', requireAuth, canManageServers, (req, res) => {
 });
 
 // DELETE /api/servers/:id - Remove server (system admin only)
-router.delete('/:id', requireAuth, canManageServers, (req, res) => {
+router.delete('/:id', requireAuth, canManageServers, validateParams(schemas.serverIdParam), (req, res) => {
   const db = getDb();
 
   const existing = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
@@ -166,7 +166,7 @@ router.delete('/:id', requireAuth, canManageServers, (req, res) => {
 });
 
 // POST /api/servers/:id/regenerate-token - Regenerate auth token (system admin only)
-router.post('/:id/regenerate-token', requireAuth, canManageServers, (req, res) => {
+router.post('/:id/regenerate-token', requireAuth, canManageServers, validateParams(schemas.serverIdParam), (req, res) => {
   const db = getDb();
 
   const existing = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
@@ -195,6 +195,93 @@ router.post('/:id/regenerate-token', requireAuth, canManageServers, (req, res) =
     server: rowToServer(db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow),
     bootstrapCommand,
   });
+});
+
+// ==================
+// Agent Token Management
+// ==================
+
+// GET /api/servers/:id/tokens - List all tokens for a server
+router.get('/:id/tokens', requireAuth, canManageServers, validateParams(schemas.serverIdParam), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const db = getDb();
+
+    // Verify server exists
+    const existing = db.prepare('SELECT id FROM servers WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+    }
+
+    const { agentTokenService } = await import('../../services/agentTokenService.js');
+    const tokens = agentTokenService.listTokens(req.params.id);
+
+    res.json(tokens);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/servers/:id/tokens - Create a new token for a server
+router.post('/:id/tokens', requireAuth, canManageServers, validateParams(schemas.serverIdParam), validateBody(schemas.agentTokens.create), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const db = getDb();
+
+    // Verify server exists
+    const existing = db.prepare('SELECT id, is_core FROM servers WHERE id = ?').get(req.params.id) as { id: string; is_core: number } | undefined;
+    if (!existing) {
+      throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+    }
+
+    if (existing.is_core) {
+      throw createError('Cannot create tokens for core server', 400, 'CANNOT_MODIFY_CORE');
+    }
+
+    const { agentTokenService } = await import('../../services/agentTokenService.js');
+    const { name, expiresIn } = req.body;
+
+    const result = agentTokenService.createToken(
+      req.params.id,
+      { name, expiresIn },
+      req.user?.userId
+    );
+
+    // Return token info with raw token (only visible once)
+    res.status(201).json({
+      token: result.token,
+      rawToken: result.rawToken,
+      message: 'Token created successfully. Save the raw token now - it will not be shown again.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/servers/:id/tokens/:tokenId - Revoke a specific token
+router.delete('/:id/tokens/:tokenId', requireAuth, canManageServers, validateParams(schemas.serverTokenParams), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const db = getDb();
+
+    // Verify server exists
+    const existing = db.prepare('SELECT id FROM servers WHERE id = ?').get(req.params.id);
+    if (!existing) {
+      throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+    }
+
+    const { agentTokenService } = await import('../../services/agentTokenService.js');
+    const revoked = agentTokenService.revokeToken(
+      req.params.tokenId,
+      req.params.id,
+      req.user?.userId
+    );
+
+    if (!revoked) {
+      throw createError('Token not found', 404, 'TOKEN_NOT_FOUND');
+    }
+
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;

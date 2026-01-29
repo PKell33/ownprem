@@ -1,8 +1,13 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { getDb } from '../../db/index.js';
 import { requireAuth, requireSystemAdmin, AuthenticatedRequest } from '../middleware/auth.js';
+import { validateQuery, schemas } from '../middleware/validate.js';
 
 const router = Router();
+
+// Infer the validated query type from the schema
+type AuditQuery = z.infer<typeof schemas.query.audit>;
 
 interface AuditLogRow {
   id: number;
@@ -20,12 +25,11 @@ interface AuditLogRow {
  * GET /api/audit-logs
  * List audit log entries (system admin only)
  */
-router.get('/', requireAuth, requireSystemAdmin, async (req: AuthenticatedRequest, res, next) => {
+router.get('/', requireAuth, requireSystemAdmin, validateQuery(schemas.query.audit), async (req: AuthenticatedRequest, res, next) => {
   try {
     const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
-    const offset = parseInt(req.query.offset as string) || 0;
-    const action = req.query.action as string | undefined;
+    // Use validated query params (with defaults from schema)
+    const { limit, offset, action } = req.query as unknown as AuditQuery;
 
     let query = `
       SELECT

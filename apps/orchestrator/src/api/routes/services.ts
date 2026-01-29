@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { serviceRegistry } from '../../services/serviceRegistry.js';
 import { createError } from '../middleware/error.js';
+import { validateParams, schemas } from '../middleware/validate.js';
 
 const router = Router();
 
@@ -15,7 +16,7 @@ router.get('/', async (_req, res, next) => {
 });
 
 // GET /api/services/:name - Get providers for a service
-router.get('/:name', async (req, res, next) => {
+router.get('/:name', validateParams(schemas.serviceNameParam), async (req, res, next) => {
   try {
     const services = await serviceRegistry.findAllServices(req.params.name);
 

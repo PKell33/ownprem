@@ -11,15 +11,19 @@ export type AuditAction =
   | 'deployment_stopped'
   | 'deployment_restarted'
   | 'deployment_configured'
+  | 'secrets_rotated'
   | 'server_registered'
   | 'server_deleted'
   | 'server_updated'
+  | 'agent_token_created'
+  | 'agent_token_revoked'
   | 'user_login'
   | 'user_logout'
   | 'user_created'
   | 'authorization_denied'
   | 'totp_enabled'
-  | 'totp_disabled';
+  | 'totp_disabled'
+  | 'sessions_cleanup';
 
 export type ResourceType = 'deployment' | 'server' | 'user' | 'auth';
 

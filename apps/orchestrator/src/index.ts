@@ -5,6 +5,7 @@ import { createApi, initializeApi } from './api/index.js';
 import { createWebSocket, shutdownWebSocket } from './websocket/index.js';
 import { secretsManager } from './services/secretsManager.js';
 import { proxyManager } from './services/proxyManager.js';
+import { startSessionCleanup, stopSessionCleanup } from './jobs/sessionCleanup.js';
 import logger from './lib/logger.js';
 
 // Track shutdown state for graceful shutdown
@@ -39,6 +40,9 @@ async function main(): Promise<void> {
   // Initialize WebSocket
   createWebSocket(httpServer);
 
+  // Start background jobs
+  startSessionCleanup();
+
   // Start listening on all interfaces for remote access
   httpServer.listen(config.port, '0.0.0.0', async () => {
     logger.info({
@@ -70,11 +74,15 @@ async function main(): Promise<void> {
     logger.info('Starting graceful shutdown...');
 
     try {
-      // 1. Shutdown WebSocket (notifies agents, waits for pending commands)
+      // 1. Stop background jobs
+      stopSessionCleanup();
+      logger.info('Background jobs stopped');
+
+      // 2. Shutdown WebSocket (notifies agents, waits for pending commands)
       await shutdownWebSocket();
       logger.info('WebSocket shutdown complete');
 
-      // 2. Close HTTP server (stop accepting new connections)
+      // 3. Close HTTP server (stop accepting new connections)
       await new Promise<void>((resolve, reject) => {
         httpServer.close((err) => {
           if (err) reject(err);
@@ -83,7 +91,7 @@ async function main(): Promise<void> {
       });
       logger.info('HTTP server closed');
 
-      // 3. Close database
+      // 4. Close database
       closeDb();
       logger.info('Database closed');
 

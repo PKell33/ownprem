@@ -133,14 +133,34 @@ export function setupAgentHandler(io: SocketServer): void {
     // Core server doesn't need a token (local connection)
     // For other servers, verify the token
     if (!server.is_core) {
-      if (!token || !server.auth_token) {
+      if (!token) {
         wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: missing token');
         socket.disconnect();
         return;
       }
 
-      if (!verifyToken(token, server.auth_token)) {
-        wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: invalid token');
+      // First, check agent_tokens table for new-style tokens with expiry support
+      const tokenHash = hashToken(token);
+      const agentTokenRow = db.prepare(`
+        SELECT id FROM agent_tokens
+        WHERE server_id = ? AND token_hash = ?
+          AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+      `).get(serverId, tokenHash) as { id: string } | undefined;
+
+      if (agentTokenRow) {
+        // Valid token from agent_tokens table - update last_used_at
+        db.prepare('UPDATE agent_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?').run(agentTokenRow.id);
+        wsLogger.debug({ serverId, tokenId: agentTokenRow.id }, 'Agent authenticated via agent_tokens');
+      } else if (server.auth_token) {
+        // Fall back to legacy servers.auth_token field
+        if (!verifyToken(token, server.auth_token)) {
+          wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: invalid token');
+          socket.disconnect();
+          return;
+        }
+        wsLogger.debug({ serverId }, 'Agent authenticated via legacy auth_token');
+      } else {
+        wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: no valid token');
         socket.disconnect();
         return;
       }
