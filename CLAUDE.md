@@ -1,205 +1,213 @@
 # Ownprem
 
-Sovereign Bitcoin infrastructure platform.
+Sovereign Bitcoin infrastructure platform. Deploy and manage Bitcoin nodes, indexers, and Lightning services across one or more servers with a unified web interface.
 
 ## Quick Reference
 
-| Concept | Name | Examples |
-|---------|------|----------|
-| Orchestrator | orchestrator | Always one |
-| App Server | server | `core`, `server-1`, `server-2` |
-| App | app | `bitcoin`, `electrs`, `mempool` |
-
-## Development Phases
-
-```
-Phase 1: Local Ubuntu (all-in-one)     ← START HERE
-Phase 2: Debian VMs (multi-node)       ← Later
-Phase 3: Production                    ← Eventually
-```
+| Concept | Description |
+|---------|-------------|
+| Orchestrator | Central API server, manages deployments, secrets, proxy config |
+| Agent | Runs on each server, executes commands from orchestrator |
+| App | Bitcoin software (bitcoin, electrs, mempool, lnd, etc.) |
+| Server | Machine running an agent (core server runs both orchestrator + agent) |
 
 ## Architecture
 
 ```
 User → https://ownprem.local
-            │
-            ▼
-┌─────────────────────────────────────────┐
-│              CORE SERVER                │
-│  ┌─────────┐  ┌─────────┐  ┌────────┐ │
-│  │  Caddy  │→ │   UI    │  │  API   │ │
-│  │ (proxy) │→ │/apps/*  │  │        │ │
-│  └─────────┘  └─────────┘  └────────┘ │
-│                               │        │
-│                          WebSocket     │
-│                               │        │
-│  ┌────────────────────────────┴─────┐ │
-│  │             Agent                 │ │
-│  │  (always, even on core)          │ │
-│  └──────────────┬───────────────────┘ │
-│                 │                      │
-│           ┌─────┴─────┐                │
-│           │  bitcoin  │                │
-│           └───────────┘                │
-└─────────────────────────────────────────┘
-            │
-       WebSocket
-            │
-    ┌───────┴───────┐
-    ▼               ▼
-┌─────────┐   ┌─────────┐
-│server-1 │   │server-2 │
-│  Agent  │   │  Agent  │
-│    │    │   │    │    │
-│electrs  │   │  lnd    │
-│mempool  │   │  rtl    │
-└─────────┘   └─────────┘
+              │
+              ▼
+┌──────────────────────────────────────────┐
+│              CORE SERVER                 │
+│                                          │
+│  ┌─────────┐    ┌──────────────────────┐│
+│  │  Caddy  │───→│    Orchestrator      ││
+│  │ (proxy) │    │  - Express API       ││
+│  │         │    │  - WebSocket server  ││
+│  │ Admin   │←───│  - SQLite DB         ││
+│  │  API    │    │  - Secrets manager   ││
+│  └─────────┘    │  - Proxy manager     ││
+│       │         └──────────┬───────────┘│
+│       │                    │            │
+│       ▼              WebSocket          │
+│  ┌─────────┐              │            │
+│  │   UI    │         ┌────┴────┐       │
+│  │ (React) │         │  Agent  │       │
+│  └─────────┘         └────┬────┘       │
+│       │                   │            │
+│       ▼                   ▼            │
+│  /apps/mock-app →   [mock-app:9999]    │
+│  /apps/bitcoin  →   [bitcoind:8332]    │
+└──────────────────────────────────────────┘
+              │
+         WebSocket
+              │
+      ┌───────┴───────┐
+      ▼               ▼
+┌──────────┐   ┌──────────┐
+│ server-1 │   │ server-2 │
+│  Agent   │   │  Agent   │
+│    │     │   │    │     │
+│ electrs  │   │   lnd    │
+│ mempool  │   │   rtl    │
+└──────────┘   └──────────┘
 ```
 
 ## Project Structure
 
 ```
 ownprem/
-├── packages/shared/        # Types (@ownprem/shared)
+├── packages/shared/           # Shared types (@ownprem/shared)
 ├── apps/
-│   ├── orchestrator/       # API, WebSocket, DB, secrets, proxy
-│   ├── agent/              # Executor, reporter
-│   └── ui/                 # React frontend
-├── app-definitions/        # Bitcoin, Electrs, Mempool manifests
-└── scripts/                # Install scripts
+│   ├── orchestrator/          # API, WebSocket, DB, secrets, proxy
+│   │   └── src/
+│   │       ├── api/           # Express routes
+│   │       ├── db/            # SQLite schema and queries
+│   │       ├── services/      # Business logic
+│   │       └── websocket/     # Socket.IO server
+│   ├── agent/                 # Command executor
+│   └── ui/                    # React frontend (Vite)
+├── app-definitions/           # App manifests and install scripts
+│   ├── mock-app/              # Test app for development
+│   ├── bitcoin/               # Bitcoin Core
+│   └── .../                   # More apps
+└── scripts/                   # Installation and deployment
+    ├── install.sh             # Main installer
+    ├── caddy/                 # Caddy setup
+    └── systemd/               # Service files
 ```
 
-## Local Development (Ubuntu)
+## Development
+
+### Prerequisites
+
+- Node.js 20+
+- Caddy with Admin API enabled (`admin localhost:2019`)
+- Local domain: add `127.0.0.1 ownprem.local` to `/etc/hosts`
 
 ### Start Development
 
 ```bash
-# All-in-one (recommended)
-npm run dev
-
-# Or separate terminals:
-npm run dev:orchestrator  # Terminal 1 - API on :3001
-npm run dev:agent         # Terminal 2 - Connects to :3001
-npm run dev:ui            # Terminal 3 - Vite on :5173
+npm run dev    # Starts orchestrator + agent + UI concurrently
 ```
+
+This starts:
+- Orchestrator on `:3001` (API + WebSocket)
+- Agent connecting to orchestrator
+- Vite dev server on `:5173`
+- Caddy proxies `https://ownprem.local` → services
 
 ### Access Points
 
-| Service | URL |
-|---------|-----|
-| UI | http://localhost:5173 |
-| API | http://localhost:3001/api |
-| WebSocket | ws://localhost:3001 |
+| URL | Description |
+|-----|-------------|
+| https://ownprem.local | Main UI (via Caddy) |
+| https://ownprem.local/api | API endpoints |
+| https://ownprem.local/apps/* | Deployed app UIs |
+| http://localhost:5173 | Vite dev server (direct) |
+| http://localhost:3001/api | API (direct, no TLS) |
+
+### First-Time Setup
+
+1. Start dev server: `npm run dev`
+2. Open https://ownprem.local
+3. Accept self-signed certificate (or install Caddy's root CA)
+4. Create admin account at first login
+5. Deploy mock-app to test the flow
 
 ### Local Data
 
 ```
 ./data/ownprem.sqlite    # Database
-./data/apps/                 # Installed apps (dev)
-./logs/                      # Log files
+./data/apps/             # Installed apps
+./logs/                  # Log files
 ```
 
-### Testing Apps Locally
+## Key Services
 
-**Option A: Mock Apps (fastest)**
-- Use `app-definitions/mock-app/` for testing platform
-- No real Bitcoin needed
-- Tests full install/config/proxy flow
+### Proxy Manager (`proxyManager.ts`)
 
-**Option B: Bitcoin Regtest (realistic)**
-- Real Bitcoin, instant blocks, ~100MB
-- `network: regtest` in config
-- Good for testing actual app integration
+Manages Caddy reverse proxy routes via **Admin API** (not Caddyfile).
 
-**Option C: Platform Only**
-- Skip real apps entirely
-- Test API, UI, agent communication
-- Add apps later
+- Routes stored in `proxy_routes` and `service_routes` tables
+- `updateAndReload()` pushes JSON config to Caddy Admin API
+- Orchestrator syncs config on startup
+- Supports web UI routes (`/apps/*`) and TCP service routes
 
-## Commands
+### Deployer (`deployer.ts`)
 
-```bash
-npm run dev              # Full stack (orchestrator + agent + ui)
-npm run dev:orchestrator # Orchestrator only (port 3001)
-npm run dev:agent        # Agent only
-npm run dev:ui           # Frontend only (port 5173)
-npm run build            # Production build
-npm run test             # Tests
-npm run typecheck        # TypeScript check
+Handles app lifecycle:
+- `installApp()` - Deploy app to a server
+- `startApp()` / `stopApp()` - Control running state
+- `uninstallApp()` - Remove app and cleanup
+
+### Secrets Manager (`secretsManager.ts`)
+
+- Generates credentials (RPC passwords, etc.)
+- Encrypts secrets at rest (AES-256-GCM)
+- Renders secrets into app config files
+
+## API Endpoints
+
+### Authentication
+```
+POST /api/auth/register     # First-time admin setup
+POST /api/auth/login        # Login (returns JWT)
+POST /api/auth/logout       # Logout
+GET  /api/auth/status       # Check auth state
+POST /api/auth/totp/setup   # Enable 2FA
+POST /api/auth/totp/verify  # Verify 2FA code
 ```
 
-## Later: Debian VMs
-
-When platform works locally, test multi-node on Debian:
-
-| VM | IP | Role |
-|----|-----|------|
-| core | 10.100.6.60 | Orchestrator + Agent |
-| server-1 | 10.100.6.61 | Agent only |
-
-```bash
-# Deploy to core
-ssh core "cd /opt/ownprem/repo && git pull && npm run build"
-
-# Deploy to server-1
-ssh server-1 "cd /opt/ownprem/repo && git pull && npm run build:agent"
+### Servers
+```
+GET    /api/servers         # List all servers
+POST   /api/servers         # Register new server
+GET    /api/servers/:id     # Get server details
+PUT    /api/servers/:id     # Update server
+DELETE /api/servers/:id     # Remove server
 ```
 
-## Key Principles
-
-1. **Orchestrator always talks to agent** - Even on localhost. Same code path.
-
-2. **Agents are dumb** - Execute commands, write files, report status. No decisions.
-
-3. **Secrets stay in orchestrator** - Generated, encrypted, rendered into config files.
-
-4. **Single entry point** - All app UIs accessed via core server reverse proxy.
-
-## Database
-
-SQLite: `/var/lib/ownprem/db.sqlite`
-
-Tables: `servers`, `app_registry`, `deployments`, `secrets`, `services`, `proxy_routes`
-
-## Key Files
-
-- `apps/orchestrator/src/services/deployer.ts` - Main deployment logic
-- `apps/orchestrator/src/services/dependencyResolver.ts` - Resolves app dependencies
-- `apps/orchestrator/src/services/secretsManager.ts` - Credential generation/encryption
-- `apps/orchestrator/src/services/proxyManager.ts` - Caddy config generation
-- `apps/agent/src/executor.ts` - Runs install/configure scripts
-- `app-definitions/*/manifest.yaml` - App definitions
-
-## API
-
+### Apps
 ```
-Servers:
-  GET/POST   /api/servers
-  GET/PUT/DEL /api/servers/:id
+GET  /api/apps              # List available apps
+GET  /api/apps/:name        # Get app manifest
+```
 
-Apps:
-  GET        /api/apps
-  GET        /api/apps/:name
+### Deployments
+```
+GET    /api/deployments           # List deployments
+POST   /api/deployments           # Deploy app
+GET    /api/deployments/:id       # Get deployment
+DELETE /api/deployments/:id       # Uninstall app
+POST   /api/deployments/:id/start # Start app
+POST   /api/deployments/:id/stop  # Stop app
+```
 
-Deployments:
-  GET/POST   /api/deployments
-  GET/PUT/DEL /api/deployments/:id
-  POST       /api/deployments/:id/start
-  POST       /api/deployments/:id/stop
+### System
+```
+GET  /api/certificate       # Download Caddy root CA
+GET  /health                # Health check
+GET  /ready                 # Readiness check
 ```
 
 ## WebSocket Events
 
 ```
 Server → Client:
-  server:status, server:connected, server:disconnected
-  deployment:status, command:result
+  server:status        # Server online/offline status
+  server:connected     # Agent connected
+  server:disconnected  # Agent disconnected
+  deployment:status    # Deployment state change
+  deployment:log       # Real-time logs
 
 Agent → Orchestrator:
-  status (periodic), command:result
+  register             # Agent registration
+  status               # Periodic heartbeat
+  command:result       # Command execution result
 
 Orchestrator → Agent:
-  command (install, configure, start, stop, restart, uninstall)
+  command              # Execute command (install, start, stop, etc.)
 ```
 
 ## App Manifest Structure
@@ -209,24 +217,22 @@ name: electrs
 displayName: Electrs
 version: 0.11.0
 category: indexer
+description: Electrum server for Bitcoin
 
 source:
   type: git
-  gitUrl: https://github.com/romanz/electrs.git
+  url: https://github.com/romanz/electrs.git
 
 requires:
   - service: bitcoin-rpc
     locality: prefer-same-server
-    injectAs:
-      host: daemon_rpc_host
-      credentials:
-        rpcuser: daemon_rpc_user
 
 provides:
   - name: electrs-rpc
     port: 50001
+    protocol: tcp
 
-webui:                    # Optional
+webui:
   enabled: true
   port: 3006
   basePath: /apps/electrs
@@ -234,102 +240,106 @@ webui:                    # Optional
 configSchema:
   - name: network
     type: string
-    inheritFrom: bitcoin.network
+    default: mainnet
+    options: [mainnet, testnet, regtest]
 ```
 
-## Current Phase
+## Database Schema
 
-Phase 1: Foundation (Local Ubuntu)
+SQLite at `./data/ownprem.sqlite` (dev) or `/var/lib/ownprem/db.sqlite` (prod)
 
-- [ ] packages/shared types
-- [ ] Database schema + init
-- [ ] Express API skeleton
-- [ ] WebSocket setup
-- [ ] Agent connection handshake
-- [ ] Basic server CRUD
-- [ ] Mock app for testing
+**Tables:**
+- `users` - Admin accounts with password hashes and TOTP secrets
+- `servers` - Registered servers and connection state
+- `deployments` - Installed apps and their status
+- `secrets` - Encrypted credentials
+- `proxy_routes` - Web UI reverse proxy routes
+- `service_routes` - TCP/HTTP service routes
+- `audit_log` - Security audit trail
 
-## Mock App for Testing
-
-Create `app-definitions/mock-app/` to test the platform without real Bitcoin:
-
-```yaml
-# manifest.yaml
-name: mock-app
-displayName: Mock App
-version: 1.0.0
-category: utility
-
-provides:
-  - name: mock-service
-    port: 9999
-    protocol: http
-
-webui:
-  enabled: true
-  port: 9999
-  basePath: /apps/mock-app
-
-configSchema:
-  - name: message
-    type: string
-    label: Welcome Message
-    default: "Hello from Mock App"
-```
+## Production Installation
 
 ```bash
-# install.sh
-#!/bin/bash
-cat > /opt/ownprem/apps/mock-app/server.js << 'EOF'
-const http = require('http');
-const msg = process.env.MESSAGE || 'Mock App Running';
-http.createServer((req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.end(`<h1>${msg}</h1><p>Install works!</p>`);
-}).listen(9999, () => console.log('Mock app on :9999'));
-EOF
+# Full installation (orchestrator + agent + Caddy)
+sudo ./scripts/install.sh --local
 
-node /opt/ownprem/apps/mock-app/server.js &
+# With Let's Encrypt (public domain)
+sudo ./scripts/install.sh --domain ownprem.example.com --email admin@example.com
+
+# Agent-only (additional servers)
+sudo ./scripts/install.sh --type agent --skip-caddy
 ```
 
-## Testing
+### Service Management
 
 ```bash
-# Run all tests
-npm run test
+# Status
+systemctl status ownprem-orchestrator ownprem-agent caddy
 
-# Run specific test
-npm run test -- --grep "deployer"
+# Logs
+journalctl -u ownprem-orchestrator -f
+journalctl -u ownprem-agent -f
 
-# Test API
-curl http://localhost:3001/api/servers
-
-# Test agent status
-curl http://localhost:3001/api/servers/core
-
-# Check WebSocket
-npx wscat -c ws://localhost:3001
-
-# Test full install flow with mock app
-curl -X POST http://localhost:3001/api/deployments \
-  -H "Content-Type: application/json" \
-  -d '{"serverId": "core", "appName": "mock-app"}'
+# Restart
+systemctl restart ownprem-orchestrator
 ```
+
+### Configuration Files
+
+```
+/etc/ownprem/orchestrator.env   # Orchestrator config
+/etc/ownprem/agent.env          # Agent config
+/etc/caddy/Caddyfile            # Caddy (minimal, config via Admin API)
+```
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `apps/orchestrator/src/index.ts` | Orchestrator entry point |
+| `apps/orchestrator/src/services/deployer.ts` | App deployment logic |
+| `apps/orchestrator/src/services/proxyManager.ts` | Caddy Admin API integration |
+| `apps/orchestrator/src/services/secretsManager.ts` | Credential encryption |
+| `apps/agent/src/executor.ts` | Command execution |
+| `apps/ui/src/App.tsx` | React app entry |
+| `app-definitions/*/manifest.yaml` | App definitions |
 
 ## Troubleshooting
 
+### Caddy not proxying routes
+
 ```bash
-# Check orchestrator logs
-npm run dev:orchestrator 2>&1 | tee orchestrator.log
+# Check Caddy config via Admin API
+curl -s localhost:2019/config/ | jq .
 
+# Force sync from orchestrator
+curl -X POST https://ownprem.local/api/proxy-routes/reload
+```
+
+### Agent not connecting
+
+```bash
 # Check agent logs
-npm run dev:agent 2>&1 | tee agent.log
+journalctl -u ownprem-agent -f
 
-# Check database
-sqlite3 ./data/ownprem.sqlite ".tables"
-sqlite3 ./data/ownprem.sqlite "SELECT * FROM servers;"
+# Verify orchestrator URL in config
+cat /etc/ownprem/agent.env
+```
 
-# Reset database
+### Reset development database
+
+```bash
 rm ./data/ownprem.sqlite
-npm run dev:orchestrator  # Recreates schema
+npm run dev  # Recreates schema
+```
+
+### Certificate issues
+
+```bash
+# Get Caddy root CA
+curl -k https://ownprem.local/api/certificate -o caddy-root-ca.crt
+
+# Install on Linux
+sudo cp caddy-root-ca.crt /usr/local/share/ca-certificates/
+sudo update-ca-certificates
 ```
