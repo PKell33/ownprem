@@ -11,6 +11,11 @@ source:
   tagPrefix: v
 
 requires:
+  - service: electrs-rpc
+    locality: any-server
+    injectAs:
+      host: ELECTRUM_HOST
+      port: ELECTRUM_PORT
   - service: bitcoin-rpc
     locality: any-server
     injectAs:
@@ -19,12 +24,6 @@ requires:
       credentials:
         rpcuser: CORE_RPC_USERNAME
         rpcpassword: CORE_RPC_PASSWORD
-  - service: electrs-rpc
-    locality: any-server
-    optional: true
-    injectAs:
-      host: ELECTRUM_HOST
-      port: ELECTRUM_PORT
 
 provides:
   - name: mempool-api
