@@ -13,7 +13,7 @@ export default function Settings() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold mb-2">Settings</h1>
-        <p className="text-gray-400">Configure your Nodefoundry instance</p>
+        <p className="text-gray-400">Configure your OwnPrem instance</p>
       </div>
 
       {/* Two-Factor Authentication */}
@@ -47,10 +47,10 @@ export default function Settings() {
         <h2 className="text-lg font-semibold mb-4">About</h2>
         <div className="bg-gray-800 rounded-lg border border-gray-700 p-4 space-y-3">
           <InfoRow label="Version" value="0.1.0" />
-          <InfoRow label="Project" value="Nodefoundry" />
+          <InfoRow label="Project" value="OwnPrem" />
           <div className="pt-2">
             <a
-              href="https://github.com/PKell33/nodefoundry"
+              href="https://github.com/PKell33/ownprem"
               target="_blank"
               rel="noopener noreferrer"
               className="text-bitcoin hover:underline text-sm"

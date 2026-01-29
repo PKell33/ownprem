@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/mempool}"
+APP_DIR="${APP_DIR:-/opt/ownprem/apps/mempool}"
 DATA_DIR="${DATA_DIR:-/var/lib/mempool}"
 KEEP_DATA="${KEEP_DATA:-false}"
 MYSQL_DATABASE="${MYSQL_DATABASE:-mempool}"

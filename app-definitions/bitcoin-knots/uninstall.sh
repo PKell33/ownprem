@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/bitcoin-knots}"
+APP_DIR="${APP_DIR:-/opt/ownprem/apps/bitcoin-knots}"
 DATA_DIR="${DATA_DIR:-/var/lib/bitcoin}"
 KEEP_DATA="${KEEP_DATA:-false}"
 

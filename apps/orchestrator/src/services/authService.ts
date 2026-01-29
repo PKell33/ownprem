@@ -562,7 +562,7 @@ class AuthService {
 
     // Create TOTP instance
     const totp = new OTPAuth.TOTP({
-      issuer: 'NodeFoundry',
+      issuer: 'OwnPrem',
       label: user.username,
       algorithm: 'SHA1',
       digits: 6,
@@ -615,7 +615,7 @@ class AuthService {
 
     // Verify the code
     const totp = new OTPAuth.TOTP({
-      issuer: 'NodeFoundry',
+      issuer: 'OwnPrem',
       algorithm: 'SHA1',
       digits: 6,
       period: 30,
@@ -642,7 +642,7 @@ class AuthService {
 
     // First try TOTP code
     const totp = new OTPAuth.TOTP({
-      issuer: 'NodeFoundry',
+      issuer: 'OwnPrem',
       algorithm: 'SHA1',
       digits: 6,
       period: 30,

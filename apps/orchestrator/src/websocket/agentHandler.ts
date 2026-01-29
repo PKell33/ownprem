@@ -3,7 +3,7 @@ import { timingSafeEqual, createHash } from 'crypto';
 import { getDb } from '../db/index.js';
 import { wsLogger } from '../lib/logger.js';
 import { authService } from '../services/authService.js';
-import type { AgentStatusReport, CommandResult, ServerMetrics } from '@nodefoundry/shared';
+import type { AgentStatusReport, CommandResult, ServerMetrics } from '@ownprem/shared';
 
 interface AgentAuth {
   serverId?: string;

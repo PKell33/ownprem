@@ -2,7 +2,7 @@
 set -e
 
 # Configuration from environment
-APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/mempool}"
+APP_DIR="${APP_DIR:-/opt/ownprem/apps/mempool}"
 DATA_DIR="${DATA_DIR:-/var/lib/mempool}"
 VERSION="${APP_VERSION:-3.0.0}"
 BUILD_DIR="/tmp/mempool-build"
@@ -77,7 +77,7 @@ server {
     listen 3006;
     server_name _;
 
-    root /opt/nodefoundry/apps/mempool/frontend;
+    root /opt/ownprem/apps/mempool/frontend;
     index index.html;
 
     # Security headers

@@ -2,7 +2,7 @@ import nunjucks from 'nunjucks';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { config } from '../config.js';
-import type { AppManifest, ConfigFile } from '@nodefoundry/shared';
+import type { AppManifest, ConfigFile } from '@ownprem/shared';
 
 export class ConfigRenderer {
   private env: nunjucks.Environment;
@@ -74,7 +74,7 @@ export class ConfigRenderer {
       },
       mempool: {
         template: 'mempool-config.json.njk',
-        output: '/opt/nodefoundry/apps/mempool/backend/mempool-config.json',
+        output: '/opt/ownprem/apps/mempool/backend/mempool-config.json',
         mode: '0644',
       },
       lnd: {

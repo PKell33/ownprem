@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import { dirname } from 'path';
 import { getDb } from '../db/index.js';
 import { v4 as uuidv4 } from 'uuid';
-import type { AppManifest } from '@nodefoundry/shared';
+import type { AppManifest } from '@ownprem/shared';
 
 interface ProxyRoute {
   id: string;
@@ -134,7 +134,7 @@ export class ProxyManager {
     reverse_proxy ${route.upstream}
   }`).join('\n');
 
-    return `# Nodefoundry Caddy Configuration
+    return `# Ownprem Caddy Configuration
 # Auto-generated - do not edit manually
 
 {
@@ -144,7 +144,7 @@ export class ProxyManager {
 :3000 {
   # Foundry UI (static files)
   handle / {
-    root * /opt/nodefoundry/ui/dist
+    root * /opt/ownprem/ui/dist
     file_server
     try_files {path} /index.html
   }
@@ -164,7 +164,7 @@ ${routeBlocks}
 
   # Fallback to UI for SPA routing
   handle {
-    root * /opt/nodefoundry/ui/dist
+    root * /opt/ownprem/ui/dist
     file_server
     try_files {path} /index.html
   }

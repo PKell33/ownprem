@@ -278,7 +278,7 @@ export default function Servers() {
       >
         <div className="space-y-6">
           <p className="text-sm text-gray-400">
-            This guide explains how to connect a server to Nodefoundry. To get the actual install command with
+            This guide explains how to connect a server to OwnPrem. To get the actual install command with
             authentication token, click <strong>"Generate New Token"</strong> from the server menu.
           </p>
 
@@ -334,7 +334,7 @@ export default function Servers() {
             <h4 className="text-sm font-medium mb-2">What the installer does</h4>
             <ul className="text-xs text-gray-400 space-y-1">
               <li>• Installs Node.js 20 LTS</li>
-              <li>• Creates nodefoundry system user</li>
+              <li>• Creates ownprem system user</li>
               <li>• Downloads and configures the agent</li>
               <li>• Sets up systemd service for automatic startup</li>
             </ul>

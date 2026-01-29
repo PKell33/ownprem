@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/electrs}"
+APP_DIR="${APP_DIR:-/opt/ownprem/apps/electrs}"
 DATA_DIR="${DATA_DIR:-/var/lib/electrs}"
 KEEP_DATA="${KEEP_DATA:-false}"
 

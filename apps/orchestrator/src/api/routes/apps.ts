@@ -5,8 +5,8 @@ import { parse as parseYaml } from 'yaml';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { createError } from '../middleware/error.js';
-import { AppManifestSchema } from '@nodefoundry/shared';
-import type { AppManifest } from '@nodefoundry/shared';
+import { AppManifestSchema } from '@ownprem/shared';
+import type { AppManifest } from '@ownprem/shared';
 
 const router = Router();
 

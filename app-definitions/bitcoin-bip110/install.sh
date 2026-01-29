@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/bitcoin-bip110}"
+APP_DIR="${APP_DIR:-/opt/ownprem/apps/bitcoin-bip110}"
 DATA_DIR="${DATA_DIR:-/var/lib/bitcoin}"
 VERSION="${APP_VERSION:-29.2.knots20251110}"
 BIP110_VERSION="v0.1"

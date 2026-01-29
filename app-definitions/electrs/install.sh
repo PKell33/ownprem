@@ -2,7 +2,7 @@
 set -e
 
 # Configuration from environment
-APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/electrs}"
+APP_DIR="${APP_DIR:-/opt/ownprem/apps/electrs}"
 DATA_DIR="${DATA_DIR:-/var/lib/electrs}"
 VERSION="${APP_VERSION:-0.10.6}"
 BUILD_DIR="/tmp/electrs-build"

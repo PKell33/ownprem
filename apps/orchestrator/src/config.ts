@@ -11,7 +11,7 @@ export const config = {
   isDevelopment,
 
   database: {
-    path: process.env.DATABASE_PATH || join(__dirname, '../../../data/nodefoundry.sqlite'),
+    path: process.env.DATABASE_PATH || join(__dirname, '../../../data/ownprem.sqlite'),
   },
 
   paths: {

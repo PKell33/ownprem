@@ -5,7 +5,7 @@ import { createError } from '../middleware/error.js';
 import { validateBody, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { hashToken } from '../../websocket/agentHandler.js';
-import type { Server, ServerMetrics } from '@nodefoundry/shared';
+import type { Server, ServerMetrics } from '@ownprem/shared';
 
 // Helper: Check if user can manage servers (system admin only for now)
 function canManageServers(req: AuthenticatedRequest, res: Response, next: NextFunction): void {

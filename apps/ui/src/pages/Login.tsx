@@ -117,7 +117,7 @@ export function Login() {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold mb-2">
-            <span className="text-bitcoin">N</span>odefoundry
+            <span className="text-bitcoin">O</span>wnPrem
           </h1>
           <p className="dark:text-gray-400 light:text-gray-500">
             {totpRequired
@@ -269,7 +269,7 @@ export function Login() {
 
               {isSetup && (
                 <p className="text-center text-sm dark:text-gray-400 light:text-gray-500">
-                  This will create the initial admin account for NodeFoundry.
+                  This will create the initial admin account for OwnPrem.
                 </p>
               )}
             </div>

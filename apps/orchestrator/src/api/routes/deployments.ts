@@ -7,7 +7,7 @@ import { createError } from '../middleware/error.js';
 import { validateBody, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { authService } from '../../services/authService.js';
-import type { AppManifest } from '@nodefoundry/shared';
+import type { AppManifest } from '@ownprem/shared';
 
 const router = Router();
 

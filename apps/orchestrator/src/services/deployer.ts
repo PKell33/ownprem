@@ -6,7 +6,7 @@ import { serviceRegistry } from './serviceRegistry.js';
 import { dependencyResolver } from './dependencyResolver.js';
 import { proxyManager } from './proxyManager.js';
 import { sendCommand, isAgentConnected } from '../websocket/agentHandler.js';
-import type { AppManifest, Deployment, DeploymentStatus, ConfigFile } from '@nodefoundry/shared';
+import type { AppManifest, Deployment, DeploymentStatus, ConfigFile } from '@ownprem/shared';
 
 interface DeploymentRow {
   id: string;

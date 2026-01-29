@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_DIR="${APP_DIR:-/opt/nodefoundry/apps/bitcoin-core}"
+APP_DIR="${APP_DIR:-/opt/ownprem/apps/bitcoin-core}"
 DATA_DIR="${DATA_DIR:-/var/lib/bitcoin}"
 VERSION="${APP_VERSION:-28.0}"
 NETWORK="${NETWORK:-mainnet}"

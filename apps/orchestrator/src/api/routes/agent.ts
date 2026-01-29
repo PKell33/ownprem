@@ -15,7 +15,7 @@ router.get('/install.sh', (_req, res) => {
     // Production: relative to this file
     join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..', 'scripts', 'install-agent.sh'),
     // Installed location
-    '/opt/nodefoundry/scripts/install-agent.sh',
+    '/opt/ownprem/scripts/install-agent.sh',
   ];
 
   let scriptContent: string | null = null;
