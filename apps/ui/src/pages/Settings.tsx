@@ -519,8 +519,9 @@ function GroupManagement() {
     }
   };
 
+  // Filter out users who are already members OR are system admins (they have full access already)
   const nonMembers = allUsers.filter(u =>
-    !selectedGroup?.members.some(m => m.userId === u.id)
+    !selectedGroup?.members.some(m => m.userId === u.id) && !u.is_system_admin
   );
 
   return (
