@@ -16,7 +16,7 @@ interface ServiceRow {
 interface ServerRow {
   id: string;
   host: string | null;
-  is_foundry: number;
+  is_core: number;
 }
 
 export class ServiceRegistry {
@@ -30,12 +30,12 @@ export class ServiceRegistry {
     const db = getDb();
 
     // Get server host
-    const server = db.prepare('SELECT host, is_foundry FROM servers WHERE id = ?').get(serverId) as ServerRow | undefined;
+    const server = db.prepare('SELECT host, is_core FROM servers WHERE id = ?').get(serverId) as ServerRow | undefined;
     if (!server) {
       throw new Error(`Server ${serverId} not found`);
     }
 
-    const host = server.is_foundry ? '127.0.0.1' : (server.host || '127.0.0.1');
+    const host = server.is_core ? '127.0.0.1' : (server.host || '127.0.0.1');
     const id = uuidv4();
 
     db.prepare(`

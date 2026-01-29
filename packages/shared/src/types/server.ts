@@ -2,7 +2,7 @@ export interface Server {
   id: string;
   name: string;
   host: string | null;
-  isFoundry: boolean;
+  isCore: boolean;
   agentStatus: 'online' | 'offline' | 'error';
   authToken: string | null;
   metrics?: ServerMetrics;

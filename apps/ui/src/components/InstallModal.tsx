@@ -124,7 +124,7 @@ export default function InstallModal({ appName, servers, onClose }: InstallModal
                     <div>
                       <div className="font-medium">{server.name}</div>
                       <div className="text-sm text-gray-400">
-                        {server.isFoundry ? 'Orchestrator' : server.host}
+                        {server.isCore ? 'Orchestrator' : server.host}
                       </div>
                     </div>
                   </label>

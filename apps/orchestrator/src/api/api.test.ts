@@ -180,7 +180,7 @@ describe('API Endpoints', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.id).toBe('foundry');
-      expect(res.body.isFoundry).toBe(true);
+      expect(res.body.isCore).toBe(true);
     });
 
     it('GET /api/servers/:id should return 404 for unknown server', async () => {

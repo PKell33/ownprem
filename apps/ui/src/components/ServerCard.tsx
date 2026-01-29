@@ -59,18 +59,18 @@ export default function ServerCard({ server, deploymentCount = 0, onClick, onDel
       <div className="flex items-start justify-between mb-2 md:mb-3">
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <div className="p-1.5 md:p-2 rounded-lg flex-shrink-0 dark:bg-gray-700 light:bg-gray-100">
-            <Server size={18} className={server.isFoundry ? 'text-bitcoin' : 'dark:text-gray-400 light:text-gray-500'} />
+            <Server size={18} className={server.isCore ? 'text-bitcoin' : 'dark:text-gray-400 light:text-gray-500'} />
           </div>
           <div className="min-w-0">
             <h3 className="font-medium text-sm md:text-base truncate">{server.name}</h3>
             <p className="text-xs md:text-sm dark:text-gray-400 light:text-gray-500 truncate">
-              {server.isFoundry ? 'Orchestrator' : server.host || 'Unknown'}
+              {server.isCore ? 'Orchestrator' : server.host || 'Unknown'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={server.agentStatus} />
-          {canManage && !server.isFoundry && (
+          {canManage && !server.isCore && (
             <div className="relative">
               <button
                 onClick={(e) => {

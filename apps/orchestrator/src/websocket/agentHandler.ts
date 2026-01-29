@@ -16,7 +16,7 @@ const browserClients = new Set<Socket>();
 interface ServerRow {
   id: string;
   auth_token: string | null;
-  is_foundry: number;
+  is_core: number;
 }
 
 interface AgentConnection {
@@ -86,7 +86,7 @@ export function setupAgentHandler(io: SocketServer): void {
 
     // Validate auth token
     const db = getDb();
-    const server = db.prepare('SELECT id, auth_token, is_foundry FROM servers WHERE id = ?').get(serverId) as ServerRow | undefined;
+    const server = db.prepare('SELECT id, auth_token, is_core FROM servers WHERE id = ?').get(serverId) as ServerRow | undefined;
 
     if (!server) {
       wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: unknown server');
@@ -96,7 +96,7 @@ export function setupAgentHandler(io: SocketServer): void {
 
     // Foundry doesn't need a token (local connection)
     // For other servers, verify the token
-    if (!server.is_foundry) {
+    if (!server.is_core) {
       if (!token || !server.auth_token) {
         wsLogger.warn({ serverId, clientIp }, 'Agent connection rejected: missing token');
         socket.disconnect();

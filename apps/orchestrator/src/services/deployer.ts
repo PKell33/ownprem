@@ -87,7 +87,7 @@ export class Deployer {
     }
 
     // Resolve full config (user config + dependencies + defaults)
-    const resolvedConfig = await dependencyResolver.resolve(manifest, serverId, userConfig, serviceBindings);
+    const resolvedConfig = await dependencyResolver.resolve(manifest, serverId, userConfig);
 
     // Generate secrets for fields marked as generated
     const secrets: Record<string, string> = {};

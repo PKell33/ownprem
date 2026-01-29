@@ -26,7 +26,7 @@ interface ServerRow {
   id: string;
   name: string;
   host: string | null;
-  is_foundry: number;
+  is_core: number;
   agent_status: string;
   auth_token: string | null;
   metrics: string | null;
@@ -40,7 +40,7 @@ function rowToServer(row: ServerRow): Server {
     id: row.id,
     name: row.name,
     host: row.host,
-    isFoundry: Boolean(row.is_foundry),
+    isCore: Boolean(row.is_core),
     agentStatus: row.agent_status as Server['agentStatus'],
     authToken: row.auth_token,
     metrics: row.metrics ? JSON.parse(row.metrics) as ServerMetrics : undefined,
@@ -53,7 +53,7 @@ function rowToServer(row: ServerRow): Server {
 // GET /api/servers - List all servers
 router.get('/', requireAuth, (_req, res) => {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM servers ORDER BY is_foundry DESC, name').all() as ServerRow[];
+  const rows = db.prepare('SELECT * FROM servers ORDER BY is_core DESC, name').all() as ServerRow[];
   const servers = rows.map(rowToServer);
   res.json(servers);
 });
@@ -75,7 +75,7 @@ router.post('/', requireAuth, canManageServers, validateBody(schemas.servers.cre
 
   // Store the hashed token in the database
   const stmt = db.prepare(`
-    INSERT INTO servers (id, name, host, is_foundry, auth_token, agent_status)
+    INSERT INTO servers (id, name, host, is_core, auth_token, agent_status)
     VALUES (?, ?, ?, FALSE, ?, 'offline')
   `);
   stmt.run(id, name, host, hashedAuthToken);
@@ -114,7 +114,7 @@ router.put('/:id', requireAuth, canManageServers, (req, res) => {
     throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
   }
 
-  if (existing.is_foundry) {
+  if (existing.is_core) {
     throw createError('Cannot modify foundry server', 400, 'CANNOT_MODIFY_FOUNDRY');
   }
 
@@ -153,7 +153,7 @@ router.delete('/:id', requireAuth, canManageServers, (req, res) => {
     throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
   }
 
-  if (existing.is_foundry) {
+  if (existing.is_core) {
     throw createError('Cannot delete foundry server', 400, 'CANNOT_DELETE_FOUNDRY');
   }
 
@@ -170,7 +170,7 @@ router.post('/:id/regenerate-token', requireAuth, canManageServers, (req, res) =
     throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
   }
 
-  if (existing.is_foundry) {
+  if (existing.is_core) {
     throw createError('Cannot regenerate token for foundry server', 400, 'CANNOT_MODIFY_FOUNDRY');
   }
 
