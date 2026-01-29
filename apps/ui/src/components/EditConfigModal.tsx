@@ -95,7 +95,7 @@ export default function EditConfigModal({
           <button
             onClick={handleSave}
             disabled={saving || !hasChanges() || editableFields.length === 0}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 disabled:bg-gray-200 dark:disabled:bg-gray-700 disabled:text-gray-500 text-black font-medium rounded transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-accent hover:bg-accent/90 disabled:bg-gray-200 dark:disabled:bg-gray-700 disabled:text-gray-500 text-slate-900 font-medium rounded transition-colors"
           >
             {saving ? (
               <>
@@ -142,7 +142,7 @@ function ConfigFieldInput({
           id={id}
           value={String(value || '')}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-bitcoin"
+          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
         >
           {field.options.map((opt) => (
             <option key={opt} value={opt}>
@@ -156,7 +156,7 @@ function ConfigFieldInput({
             type="checkbox"
             checked={Boolean(value)}
             onChange={(e) => onChange(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-bitcoin focus:ring-bitcoin"
+            className="w-4 h-4 rounded border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-accent focus:ring-accent"
           />
           <span className="text-gray-600 dark:text-gray-300">Enabled</span>
         </label>
@@ -166,7 +166,7 @@ function ConfigFieldInput({
           type="number"
           value={String(value || '')}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-bitcoin"
+          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
         />
       ) : field.secret ? (
         <input
@@ -175,7 +175,7 @@ function ConfigFieldInput({
           value={String(value || '')}
           placeholder="********"
           onChange={(e) => onChange(e.target.value)}
-          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-bitcoin"
+          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
         />
       ) : (
         <input
@@ -183,7 +183,7 @@ function ConfigFieldInput({
           type="text"
           value={String(value || '')}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-bitcoin"
+          className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
         />
       )}
     </div>

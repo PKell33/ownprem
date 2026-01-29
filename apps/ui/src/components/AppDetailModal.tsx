@@ -91,7 +91,7 @@ export default function AppDetailModal({
             ) : canManage && (
               <button
                 onClick={onInstall}
-                className="flex items-center gap-2 px-6 py-2.5 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded-lg transition-colors"
+                className="flex items-center gap-2 px-6 py-2.5 bg-accent hover:bg-accent/90 text-slate-900 font-medium rounded-lg transition-colors"
               >
                 <Download size={18} />
                 Install

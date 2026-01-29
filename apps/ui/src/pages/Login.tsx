@@ -115,8 +115,8 @@ export function Login() {
 
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-2">
-            <span className="text-bitcoin">O</span>wnPrem
+          <h1 className="text-3xl font-extrabold tracking-tight mb-2">
+            <span>&#x232C;</span><span style={{ color: '#7aa2f7' }}>w</span><span>nPrem</span>
           </h1>
           <p className="text-gray-500 dark:text-gray-400">
             {totpRequired

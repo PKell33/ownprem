@@ -46,7 +46,7 @@ export default function Dashboard() {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2 md:gap-4">
         <StatCard
-          icon={<Server className="text-bitcoin" size={20} />}
+          icon={<Server className="text-accent" size={20} />}
           label="Servers"
           value={status?.servers.online || 0}
           subtext={`of ${status?.servers.total || 0}`}
@@ -98,7 +98,7 @@ export default function Dashboard() {
           <h2 className="text-base md:text-lg font-semibold">Servers</h2>
           <Link
             to="/servers"
-            className="text-sm text-gray-500 dark:text-gray-400 hover:text-bitcoin"
+            className="text-sm text-gray-500 dark:text-gray-400 hover:text-accent"
           >
             View all
           </Link>
@@ -156,7 +156,7 @@ export default function Dashboard() {
           <h2 className="text-base md:text-lg font-semibold">All Deployments</h2>
           <Link
             to="/apps"
-            className="text-sm text-gray-500 dark:text-gray-400 hover:text-bitcoin"
+            className="text-sm text-gray-500 dark:text-gray-400 hover:text-accent"
           >
             Manage apps
           </Link>
@@ -170,7 +170,7 @@ export default function Dashboard() {
             <p className="text-gray-500 dark:text-gray-400 mb-4">No apps deployed yet</p>
             <Link
               to="/apps"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded transition-colors text-sm"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/90 text-slate-900 font-medium rounded transition-colors text-sm"
             >
               Browse Apps
             </Link>

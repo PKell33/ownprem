@@ -3,34 +3,46 @@
 @tailwind utilities;
 
 :root {
-  --color-bitcoin: #f7931a;
+  --color-accent: #7aa2f7;
+  --color-accent-light: #3d59a1;
+
+  /* Tokyo Night palette */
+  --tokyo-bg: #1a1b26;
+  --tokyo-bg-deep: #0a0a0f;
+  --tokyo-bg-elevated: #24283b;
+  --tokyo-text: #c0caf5;
+  --tokyo-text-secondary: #9aa5ce;
+  --tokyo-text-muted: #565f89;
+  --tokyo-border: #292e42;
 }
 
-/* Dark mode (default) */
+/* Dark mode (default) - Tokyo Night theme */
 .dark {
-  --bg-primary: #111827;
-  --bg-secondary: #1f2937;
-  --bg-tertiary: #374151;
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
-  --border-color: #374151;
+  --bg-primary: var(--tokyo-bg);
+  --bg-secondary: var(--tokyo-bg-elevated);
+  --bg-tertiary: var(--tokyo-border);
+  --bg-deep: var(--tokyo-bg-deep);
+  --text-primary: var(--tokyo-text);
+  --text-secondary: var(--tokyo-text-secondary);
+  --text-muted: var(--tokyo-text-muted);
+  --border-color: var(--tokyo-border);
 }
 
 /* Light mode */
 .light {
   --bg-primary: #ffffff;
-  --bg-secondary: #f9fafb;
-  --bg-tertiary: #f3f4f6;
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --text-muted: #9ca3af;
-  --border-color: #e5e7eb;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --border-color: #e2e8f0;
 }
 
 /* Apply theme colors */
 .dark body {
-  @apply bg-gray-900 text-gray-100;
+  background-color: var(--tokyo-bg);
+  color: var(--tokyo-text);
 }
 
 .light body {
@@ -44,7 +56,8 @@
   }
 
   .dark .card {
-    @apply bg-gray-800 border-gray-700;
+    background-color: var(--tokyo-bg-elevated);
+    border-color: var(--tokyo-border);
   }
 
   .light .card {
@@ -56,19 +69,26 @@
   }
 
   .dark .card-hover:hover {
-    @apply border-gray-600;
+    border-color: rgba(122, 162, 247, 0.5);
   }
 
   .light .card-hover:hover {
-    @apply border-gray-300 shadow-md;
+    @apply border-blue-400 shadow-md;
   }
 
   .input-field {
-    @apply w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors;
+    @apply w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2 transition-colors;
+    --tw-ring-color: var(--color-accent);
   }
 
   .dark .input-field {
-    @apply bg-gray-700 border-gray-600 text-white placeholder-gray-400;
+    background-color: var(--tokyo-bg);
+    border-color: var(--tokyo-border);
+    color: var(--tokyo-text);
+  }
+
+  .dark .input-field::placeholder {
+    color: var(--tokyo-text-muted);
   }
 
   .light .input-field {
@@ -80,7 +100,8 @@
   }
 
   .dark .sidebar {
-    @apply bg-gray-800 border-gray-700;
+    background-color: var(--tokyo-bg-elevated);
+    border-color: var(--tokyo-border);
   }
 
   .light .sidebar {
@@ -92,11 +113,17 @@
   }
 
   .dark .nav-item {
-    @apply text-gray-400 hover:text-white hover:bg-gray-700/50;
+    color: var(--tokyo-text-secondary);
+  }
+
+  .dark .nav-item:hover {
+    color: var(--tokyo-text);
+    background-color: rgba(26, 27, 38, 0.5);
   }
 
   .dark .nav-item.active {
-    @apply bg-gray-700 text-white;
+    background-color: rgba(122, 162, 247, 0.1);
+    color: var(--color-accent);
   }
 
   .light .nav-item {
@@ -104,7 +131,7 @@
   }
 
   .light .nav-item.active {
-    @apply bg-gray-200 text-gray-900;
+    @apply bg-blue-100 text-blue-700;
   }
 
   .table-header {
@@ -112,7 +139,8 @@
   }
 
   .dark .table-header {
-    @apply bg-gray-700/50 text-gray-300;
+    background-color: var(--tokyo-bg);
+    color: var(--tokyo-text-secondary);
   }
 
   .light .table-header {
@@ -124,7 +152,11 @@
   }
 
   .dark .table-row {
-    @apply border-gray-700/50 hover:bg-gray-700/30;
+    border-color: var(--tokyo-border);
+  }
+
+  .dark .table-row:hover {
+    background-color: rgba(26, 27, 38, 0.3);
   }
 
   .light .table-row {
@@ -136,11 +168,34 @@
   }
 
   .dark .text-muted {
-    @apply text-gray-400;
+    color: var(--tokyo-text-muted);
   }
 
   .light .text-muted {
     @apply text-gray-500;
+  }
+
+  /* Accent-colored buttons */
+  .btn-primary {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors;
+    background-color: var(--color-accent);
+  }
+
+  .btn-primary:hover {
+    background-color: rgba(122, 162, 247, 0.9);
+  }
+
+  .dark .btn-primary {
+    color: var(--tokyo-bg);
+  }
+
+  .light .btn-primary {
+    @apply text-white;
+    background-color: var(--color-accent-light);
+  }
+
+  .light .btn-primary:hover {
+    background-color: rgba(61, 89, 161, 0.9);
   }
 }
 
@@ -151,7 +206,7 @@
 }
 
 .dark ::-webkit-scrollbar-track {
-  @apply bg-gray-800;
+  background-color: var(--tokyo-bg);
 }
 
 .light ::-webkit-scrollbar-track {
@@ -159,7 +214,8 @@
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  @apply bg-gray-600 rounded;
+  background-color: var(--tokyo-border);
+  @apply rounded;
 }
 
 .light ::-webkit-scrollbar-thumb {
@@ -167,7 +223,7 @@
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-500;
+  background-color: var(--tokyo-text-muted);
 }
 
 .light ::-webkit-scrollbar-thumb:hover {
@@ -200,7 +256,8 @@
 }
 
 .status-installing {
-  @apply bg-blue-500 animate-pulse;
+  background-color: var(--color-accent);
+  @apply animate-pulse;
 }
 
 /* Mobile responsive utilities */
@@ -222,10 +279,10 @@
 
 .dark .recharts-cartesian-grid-horizontal line,
 .dark .recharts-cartesian-grid-vertical line {
-  stroke: #fff;
+  stroke: var(--tokyo-text);
 }
 
 .light .recharts-cartesian-grid-horizontal line,
 .light .recharts-cartesian-grid-vertical line {
-  stroke: #000;
+  stroke: #1e293b;
 }

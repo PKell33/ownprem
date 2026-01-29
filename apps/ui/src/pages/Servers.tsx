@@ -72,7 +72,7 @@ export default function Servers() {
         </div>
         <button
           onClick={() => setAddModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent/90 text-slate-900 font-medium rounded transition-colors"
         >
           <Plus size={20} />
           Add Server
@@ -129,14 +129,14 @@ export default function Servers() {
               </h3>
               <ol className="space-y-4 text-sm text-gray-600 dark:text-gray-400">
                 <li className="flex gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-bitcoin text-black flex items-center justify-center text-xs font-bold">1</span>
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-slate-900 flex items-center justify-center text-xs font-bold">1</span>
                   <div>
                     <p className="text-gray-800 dark:text-gray-200">SSH into your new server</p>
                     <p className="text-xs mt-1">Ensure you have root or sudo access</p>
                   </div>
                 </li>
                 <li className="flex gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-bitcoin text-black flex items-center justify-center text-xs font-bold">2</span>
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-slate-900 flex items-center justify-center text-xs font-bold">2</span>
                   <div>
                     <p className="text-gray-800 dark:text-gray-200">Run the install command</p>
                     <div className="relative mt-2">
@@ -154,7 +154,7 @@ export default function Servers() {
                   </div>
                 </li>
                 <li className="flex gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-bitcoin text-black flex items-center justify-center text-xs font-bold">3</span>
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-slate-900 flex items-center justify-center text-xs font-bold">3</span>
                   <div>
                     <p className="text-gray-800 dark:text-gray-200">Wait for connection</p>
                     <p className="text-xs mt-1">The server status will change from "offline" to "online" once the agent connects</p>
@@ -178,7 +178,7 @@ export default function Servers() {
                 setAddModalOpen(false);
                 setBootstrapCommand(null);
               }}
-              className="w-full px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded transition-colors"
+              className="w-full px-4 py-2 bg-accent hover:bg-accent/90 text-slate-900 font-medium rounded transition-colors"
             >
               Done
             </button>
@@ -218,14 +218,14 @@ export default function Servers() {
               </h3>
               <ol className="space-y-4 text-sm text-gray-600 dark:text-gray-400">
                 <li className="flex gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-bitcoin text-black flex items-center justify-center text-xs font-bold">1</span>
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-slate-900 flex items-center justify-center text-xs font-bold">1</span>
                   <div>
                     <p className="text-gray-800 dark:text-gray-200">SSH into your server</p>
                     <p className="text-xs mt-1">Ensure you have root or sudo access</p>
                   </div>
                 </li>
                 <li className="flex gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-bitcoin text-black flex items-center justify-center text-xs font-bold">2</span>
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-slate-900 flex items-center justify-center text-xs font-bold">2</span>
                   <div>
                     <p className="text-gray-800 dark:text-gray-200">Run the install command</p>
                     <div className="relative mt-2">
@@ -243,7 +243,7 @@ export default function Servers() {
                   </div>
                 </li>
                 <li className="flex gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-bitcoin text-black flex items-center justify-center text-xs font-bold">3</span>
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-accent text-slate-900 flex items-center justify-center text-xs font-bold">3</span>
                   <div>
                     <p className="text-gray-800 dark:text-gray-200">Wait for connection</p>
                     <p className="text-xs mt-1">The server status will change to "online" once the agent connects</p>
@@ -258,7 +258,7 @@ export default function Servers() {
                 setBootstrapCommand(null);
                 setSetupServerName('');
               }}
-              className="w-full px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 text-black font-medium rounded transition-colors"
+              className="w-full px-4 py-2 bg-accent hover:bg-accent/90 text-slate-900 font-medium rounded transition-colors"
             >
               Done
             </button>
@@ -375,7 +375,7 @@ function AddServerForm({ onSubmit }: { onSubmit: (name: string, host: string) =>
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="server-1"
-          className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-bitcoin"
+          className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
         />
       </div>
       <div>
@@ -385,13 +385,13 @@ function AddServerForm({ onSubmit }: { onSubmit: (name: string, host: string) =>
           value={host}
           onChange={(e) => setHost(e.target.value)}
           placeholder="192.168.1.100"
-          className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-bitcoin"
+          className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
         />
       </div>
       <button
         type="submit"
         disabled={!name || !host}
-        className="w-full px-4 py-2 bg-bitcoin hover:bg-bitcoin/90 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-black font-medium rounded transition-colors"
+        className="w-full px-4 py-2 bg-accent hover:bg-accent/90 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:text-gray-500 text-slate-900 font-medium rounded transition-colors"
       >
         Add Server
       </button>

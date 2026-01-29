@@ -311,7 +311,7 @@ sudo update-ca-trust`}</CodeBlock>
 
         {/* Footer */}
         <p className="mt-6 text-center text-sm text-gray-400 dark:text-gray-500">
-          <span className="text-bitcoin">O</span>wnPrem - Sovereign Bitcoin Infrastructure
+          <span>&#x232C;</span><span style={{ color: '#7aa2f7' }}>w</span><span>nPrem</span> - Sovereign Bitcoin Infrastructure
         </p>
       </div>
     </div>

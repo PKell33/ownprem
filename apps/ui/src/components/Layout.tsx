@@ -57,8 +57,8 @@ export default function Layout() {
         `}
       >
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-          <h1 className="text-xl font-bold">
-            <span className="text-bitcoin">O</span>wnPrem
+          <h1 className="text-xl font-extrabold tracking-tight">
+            <span>&#x232C;</span><span style={{ color: '#7aa2f7' }}>w</span><span>nPrem</span>
           </h1>
           {/* Mobile close button */}
           <button
@@ -156,8 +156,8 @@ export default function Layout() {
             >
               <Menu size={24} />
             </button>
-            <h1 className="text-lg font-bold">
-              <span className="text-bitcoin">O</span>wnPrem
+            <h1 className="text-lg font-extrabold tracking-tight">
+              <span>&#x232C;</span><span style={{ color: '#7aa2f7' }}>w</span><span>nPrem</span>
             </h1>
             <button
               onClick={toggleTheme}

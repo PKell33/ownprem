@@ -143,7 +143,7 @@ export default function LogViewerModal({
               onChange={(e) => setFilter(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Filter logs (regex supported)"
-              className="w-full pl-9 pr-8 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-bitcoin"
+              className="w-full pl-9 pr-8 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
             />
             {filter && (
               <button
@@ -157,7 +157,7 @@ export default function LogViewerModal({
 
           <button
             onClick={handleApplyFilter}
-            className="px-3 py-2 bg-bitcoin hover:bg-bitcoin/90 text-black text-sm font-medium rounded-lg transition-colors"
+            className="px-3 py-2 bg-accent hover:bg-accent/90 text-slate-900 text-sm font-medium rounded-lg transition-colors"
           >
             Apply
           </button>
@@ -178,7 +178,7 @@ export default function LogViewerModal({
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="rounded border-gray-300 dark:border-gray-600 text-bitcoin focus:ring-bitcoin"
+              className="rounded border-gray-300 dark:border-gray-600 text-accent focus:ring-accent"
             />
             Auto-refresh
           </label>
@@ -203,7 +203,7 @@ export default function LogViewerModal({
               <><FileText size={12} /> Reading from log file</>
             )}
             {appliedFilter && (
-              <span className="ml-2 px-2 py-0.5 bg-bitcoin/20 text-bitcoin rounded">
+              <span className="ml-2 px-2 py-0.5 bg-accent/20 text-accent rounded">
                 Filtered: {appliedFilter}
               </span>
             )}

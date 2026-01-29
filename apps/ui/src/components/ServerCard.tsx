@@ -59,7 +59,7 @@ export default function ServerCard({ server, deploymentCount = 0, onClick, onDel
       <div className="flex items-start justify-between mb-2 md:mb-3">
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <div className="p-1.5 md:p-2 rounded-lg flex-shrink-0 bg-gray-100 dark:bg-gray-700">
-            <Server size={18} className={server.isCore ? 'text-bitcoin' : 'text-gray-500 dark:text-gray-400'} />
+            <Server size={18} className={server.isCore ? 'text-accent' : 'text-gray-500 dark:text-gray-400'} />
           </div>
           <div className="min-w-0">
             <h3 className="font-medium text-sm md:text-base truncate">{server.name}</h3>

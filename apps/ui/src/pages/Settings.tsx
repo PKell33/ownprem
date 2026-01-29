@@ -53,7 +53,7 @@ export default function Settings() {
               href="https://github.com/PKell33/ownprem"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-bitcoin hover:underline text-sm"
+              className="text-accent hover:underline text-sm"
             >
               View on GitHub
             </a>

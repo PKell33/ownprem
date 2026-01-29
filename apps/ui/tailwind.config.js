@@ -8,7 +8,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        bitcoin: '#f7931a',
+        // OwnPrem brand accent color
+        accent: {
+          DEFAULT: '#7aa2f7',
+          light: '#3d59a1',
+        },
+      },
+      fontFamily: {
+        sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
       },
     },
   },

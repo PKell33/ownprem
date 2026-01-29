@@ -87,7 +87,7 @@ export default function ConnectionInfoModal({ deploymentId, isOpen, onClose }: C
     <Modal isOpen={isOpen} onClose={onClose} title="Connection Info" size="lg">
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="animate-spin text-bitcoin" size={32} />
+          <Loader2 className="animate-spin text-accent" size={32} />
         </div>
       ) : error ? (
         <div className="p-4 bg-red-900/20 border border-red-800 rounded-lg text-red-400">
