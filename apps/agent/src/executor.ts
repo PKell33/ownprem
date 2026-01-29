@@ -1,7 +1,7 @@
 import { spawnSync, spawn, ChildProcess } from 'child_process';
-import { writeFileSync, mkdirSync, existsSync, chmodSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, statSync } from 'fs';
 import { dirname, resolve, normalize } from 'path';
-import type { CommandPayload, ConfigFile } from '@ownprem/shared';
+import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult } from '@ownprem/shared';
 
 // Allowed base directories for file operations
 const ALLOWED_PATH_PREFIXES = [
@@ -17,21 +17,36 @@ const OWNER_PATTERN = /^[a-z_][a-z0-9_-]*(?::[a-z_][a-z0-9_-]*)?$/i;
 // Valid file mode (octal)
 const MODE_PATTERN = /^[0-7]{3,4}$/;
 
+// Valid app name pattern (alphanumeric, hyphen, underscore, dots)
+const APP_NAME_PATTERN = /^[a-zA-Z0-9_.-]+$/;
+
+// Maximum log lines to return
+const MAX_LOG_LINES = 1000;
+
 export class Executor {
   private runningProcesses: Map<string, ChildProcess> = new Map();
   private appsDir: string;
+  private dataDir: string;
   private allowedPaths: string[];
 
-  constructor(appsDir: string = '/opt/ownprem/apps') {
+  constructor(appsDir: string = '/opt/ownprem/apps', dataDir?: string) {
     // Ensure appsDir is absolute
     this.appsDir = resolve(appsDir);
+    // Default dataDir to /var/lib/ownprem in production, or appsDir in dev mode
+    this.dataDir = dataDir ? resolve(dataDir) : (
+      this.appsDir.includes('/opt/ownprem') ? '/var/lib/ownprem' : this.appsDir
+    );
     mkdirSync(this.appsDir, { recursive: true });
 
-    // Build allowed paths list (include appsDir for dev mode)
+    // Build allowed paths list (include appsDir and dataDir for dev mode)
     this.allowedPaths = [...ALLOWED_PATH_PREFIXES];
     if (!this.allowedPaths.some(p => this.appsDir.startsWith(p))) {
       // In dev mode, appsDir might be outside /opt/ownprem
       this.allowedPaths.push(this.appsDir + '/');
+    }
+    if (!this.allowedPaths.some(p => this.dataDir.startsWith(p))) {
+      // In dev mode, dataDir might be outside standard paths
+      this.allowedPaths.push(this.dataDir + '/');
     }
   }
 
@@ -127,12 +142,216 @@ export class Executor {
     });
 
     // Run uninstall script if it exists
-    const uninstallScript = `${this.appsDir}/${appName}/uninstall.sh`;
+    const appDir = `${this.appsDir}/${appName}`;
+    const uninstallScript = `${appDir}/uninstall.sh`;
     if (existsSync(uninstallScript)) {
       await this.runScript(uninstallScript, {
         APP_NAME: appName,
-        APP_DIR: `${this.appsDir}/${appName}`,
+        APP_DIR: appDir,
+        DATA_DIR: `${this.dataDir}/${appName}`,
       });
+    }
+
+    // Clean up the app directory
+    const { rmSync } = await import('fs');
+    try {
+      rmSync(appDir, { recursive: true, force: true });
+      console.log(`Removed app directory: ${appDir}`);
+    } catch (err) {
+      console.error(`Failed to remove app directory: ${err}`);
+    }
+  }
+
+  async getLogs(appName: string, options: LogRequestPayload = {}): Promise<Omit<LogResult, 'commandId'>> {
+    // Validate app name to prevent injection
+    if (!APP_NAME_PATTERN.test(appName)) {
+      return {
+        logs: [],
+        source: 'file',
+        hasMore: false,
+        status: 'error',
+        message: `Invalid app name: ${appName}`,
+      };
+    }
+
+    const lines = Math.min(options.lines || 100, MAX_LOG_LINES);
+    const source = options.source || 'auto';
+    const serviceName = options.serviceName || appName;
+
+    // Try journalctl first (for systemd services)
+    if (source === 'auto' || source === 'journalctl') {
+      const journalResult = await this.getJournalctlLogs(serviceName, lines, options.since, options.grep);
+      // Check if we got actual logs (not just "-- No entries --")
+      const hasRealLogs = journalResult.status === 'success' &&
+        journalResult.logs.length > 0 &&
+        !(journalResult.logs.length === 1 && journalResult.logs[0].includes('-- No entries --'));
+      if (hasRealLogs) {
+        return journalResult;
+      }
+      // If journalctl fails or returns no logs and we're on auto, try file
+      if (source === 'journalctl') {
+        return journalResult;
+      }
+    }
+
+    // Fall back to file-based logs
+    return this.getFileLogs(appName, lines, options.grep, options.logPath);
+  }
+
+  private async getJournalctlLogs(
+    appName: string,
+    lines: number,
+    since?: string,
+    grep?: string
+  ): Promise<Omit<LogResult, 'commandId'>> {
+    const args = ['--no-pager', '-u', appName, '-n', lines.toString(), '--output=short-iso'];
+
+    if (since) {
+      // Validate since format (ISO date or relative like "1h", "30m")
+      if (/^\d{4}-\d{2}-\d{2}/.test(since) || /^\d+[smhd]$/.test(since)) {
+        args.push('--since', since);
+      }
+    }
+
+    try {
+      const result = spawnSync('journalctl', args, {
+        encoding: 'utf-8',
+        timeout: 10000,
+      });
+
+      if (result.status !== 0) {
+        // journalctl failed - might not be a systemd service
+        return {
+          logs: [],
+          source: 'journalctl',
+          hasMore: false,
+          status: 'error',
+          message: result.stderr || 'journalctl failed',
+        };
+      }
+
+      let logLines = result.stdout.split('\n').filter(line => line.trim());
+
+      // Apply grep filter if provided
+      if (grep && logLines.length > 0) {
+        const grepPattern = new RegExp(grep, 'i');
+        logLines = logLines.filter(line => grepPattern.test(line));
+      }
+
+      return {
+        logs: logLines,
+        source: 'journalctl',
+        hasMore: logLines.length >= lines,
+        status: 'success',
+      };
+    } catch (err) {
+      return {
+        logs: [],
+        source: 'journalctl',
+        hasMore: false,
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Failed to read journalctl logs',
+      };
+    }
+  }
+
+  private getFileLogs(
+    appName: string,
+    lines: number,
+    grep?: string,
+    customLogPath?: string
+  ): Omit<LogResult, 'commandId'> {
+    // Build list of paths to try
+    const pathsToTry: string[] = [];
+    const appDir = `${this.appsDir}/${appName}`;
+    const appDataDir = `${this.dataDir}/${appName}`;
+
+    // If custom log path is provided, expand variables and try it first
+    if (customLogPath) {
+      const expandedPath = customLogPath
+        .replace(/\$\{appName\}/g, appName)
+        .replace(/\$\{appDir\}/g, appDir)
+        .replace(/\$\{dataDir\}/g, appDataDir);
+      pathsToTry.push(expandedPath);
+    }
+
+    // Standard paths
+    pathsToTry.push(`/var/log/ownprem/${appName}.log`);
+    pathsToTry.push(`${appDir}/logs/${appName}.log`);
+
+    // For bitcoin apps, also check common bitcoin log locations
+    if (appName.startsWith('bitcoin')) {
+      pathsToTry.push(`${appDataDir}/debug.log`);
+      pathsToTry.push(`${appDir}/data/debug.log`);
+    }
+
+    // Try each path
+    for (const logPath of pathsToTry) {
+      if (existsSync(logPath)) {
+        return this.readLogFile(logPath, lines, grep);
+      }
+    }
+
+    return {
+      logs: [],
+      source: 'file',
+      hasMore: false,
+      status: 'error',
+      message: `Log file not found. Tried: ${pathsToTry.join(', ')}`,
+    };
+  }
+
+  private readLogFile(
+    logPath: string,
+    lines: number,
+    grep?: string
+  ): Omit<LogResult, 'commandId'> {
+    try {
+      // Validate path
+      const normalizedPath = this.validatePath(logPath);
+
+      // Read file (limit to last 5MB to prevent memory issues)
+      const stats = statSync(normalizedPath);
+      const maxBytes = 5 * 1024 * 1024;
+      let content: string;
+
+      if (stats.size > maxBytes) {
+        // Read only the last 5MB of the file
+        const fd = require('fs').openSync(normalizedPath, 'r');
+        const buffer = Buffer.alloc(maxBytes);
+        require('fs').readSync(fd, buffer, 0, maxBytes, stats.size - maxBytes);
+        require('fs').closeSync(fd);
+        content = buffer.toString('utf-8');
+      } else {
+        content = readFileSync(normalizedPath, 'utf-8');
+      }
+
+      let logLines = content.split('\n').filter(line => line.trim());
+
+      // Apply grep filter if provided
+      if (grep) {
+        const grepPattern = new RegExp(grep, 'i');
+        logLines = logLines.filter(line => grepPattern.test(line));
+      }
+
+      // Take last N lines
+      const totalLines = logLines.length;
+      logLines = logLines.slice(-lines);
+
+      return {
+        logs: logLines,
+        source: 'file',
+        hasMore: totalLines > lines,
+        status: 'success',
+      };
+    } catch (err) {
+      return {
+        logs: [],
+        source: 'file',
+        hasMore: false,
+        status: 'error',
+        message: err instanceof Error ? err.message : 'Failed to read log file',
+      };
     }
   }
 
@@ -168,6 +387,11 @@ export class Executor {
           cwd: appDir,
           stdio: ['ignore', 'pipe', 'pipe'],
           detached: true,
+          env: {
+            ...process.env,
+            APP_DIR: appDir,
+            APP_NAME: service,
+          },
         });
 
         proc.stdout?.on('data', (data) => console.log(`[${service}] ${data.toString().trim()}`));
@@ -180,18 +404,33 @@ export class Executor {
         throw new Error(`No start.sh found for ${service} in dev mode`);
       }
     } else if (action === 'stop') {
+      const stopScript = `${appDir}/stop.sh`;
+      if (existsSync(stopScript)) {
+        // Run stop.sh
+        const result = spawnSync('bash', [stopScript], {
+          cwd: appDir,
+          stdio: 'pipe',
+          env: {
+            ...process.env,
+            APP_DIR: appDir,
+            APP_NAME: service,
+          },
+        });
+        if (result.status !== 0) {
+          console.error(`stop.sh failed: ${result.stderr?.toString()}`);
+        }
+      }
+      // Also clean up tracked process
       const proc = this.runningProcesses.get(service);
       if (proc && proc.pid) {
         try {
           process.kill(-proc.pid, 'SIGTERM');
         } catch {
-          process.kill(proc.pid, 'SIGTERM');
+          try { process.kill(proc.pid, 'SIGTERM'); } catch { /* ignore */ }
         }
         this.runningProcesses.delete(service);
-        console.log(`Stopped ${service} in dev mode`);
-      } else {
-        console.log(`${service} not running in dev mode`);
       }
+      console.log(`Stopped ${service} in dev mode`);
     } else if (action === 'restart') {
       await this.systemctl('stop', service);
       await this.systemctl('start', service);

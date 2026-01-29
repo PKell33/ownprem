@@ -42,6 +42,11 @@ export const WebUISchema = z.object({
   basePath: z.string().startsWith('/'),
 });
 
+export const LoggingSchema = z.object({
+  logFile: z.string().optional(),
+  serviceName: z.string().optional(),
+});
+
 export const ConfigFieldSchema = z.object({
   name: z.string(),
   type: z.enum(['string', 'number', 'boolean', 'select', 'password']),
@@ -67,6 +72,7 @@ export const AppManifestSchema = z.object({
   requires: z.array(ServiceRequirementSchema).optional(),
   tor: z.array(TorServiceSchema).optional(),
   webui: WebUISchema.optional(),
+  logging: LoggingSchema.optional(),
   configSchema: z.array(ConfigFieldSchema),
   resources: z.object({
     minMemory: z.string().optional(),

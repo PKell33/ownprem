@@ -23,7 +23,7 @@ fi
 
 if [[ -z "$DOMAIN" ]]; then
     log_error "Usage: $0 <domain> [admin-email]"
-    log_info "Example: $0 foundry.example.com admin@example.com"
+    log_info "Example: $0 ownprem.example.com admin@example.com"
     exit 1
 fi
 

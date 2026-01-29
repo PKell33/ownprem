@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import type { AgentCommand, AgentStatusReport } from '@ownprem/shared';
+import type { AgentCommand, AgentStatusReport, LogResult } from '@ownprem/shared';
 
 const RECONNECTION_DELAY_MS = 5000;
 const RECONNECTION_DELAY_MAX_MS = 30000;
@@ -84,6 +84,14 @@ export class Connection {
       return;
     }
     this.socket.emit('command:result', result);
+  }
+
+  sendLogResult(result: LogResult): void {
+    if (!this.socket?.connected) {
+      console.warn('Cannot send log result: not connected');
+      return;
+    }
+    this.socket.emit('logs:result', result);
   }
 
   isConnected(): boolean {

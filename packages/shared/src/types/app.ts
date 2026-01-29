@@ -16,6 +16,13 @@ export interface AppManifest {
 
   webui?: WebUI;
 
+  logging?: {
+    // Path to log file, supports variables: ${dataDir}, ${appName}
+    logFile?: string;
+    // Systemd service name if different from app name
+    serviceName?: string;
+  };
+
   configSchema: ConfigField[];
 
   resources?: {

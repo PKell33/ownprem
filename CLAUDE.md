@@ -6,8 +6,8 @@ Sovereign Bitcoin infrastructure platform.
 
 | Concept | Name | Examples |
 |---------|------|----------|
-| Orchestrator | foundry | Always one |
-| App Server | server | `foundry`, `server-1`, `server-2` |
+| Orchestrator | orchestrator | Always one |
+| App Server | server | `core`, `server-1`, `server-2` |
 | App | app | `bitcoin`, `electrs`, `mempool` |
 
 ## Development Phases
@@ -21,11 +21,11 @@ Phase 3: Production                    ← Eventually
 ## Architecture
 
 ```
-User → https://foundry.local
+User → https://ownprem.local
             │
             ▼
 ┌─────────────────────────────────────────┐
-│              FOUNDRY                    │
+│              CORE SERVER                │
 │  ┌─────────┐  ┌─────────┐  ┌────────┐ │
 │  │  Caddy  │→ │   UI    │  │  API   │ │
 │  │ (proxy) │→ │/apps/*  │  │        │ │
@@ -35,7 +35,7 @@ User → https://foundry.local
 │                               │        │
 │  ┌────────────────────────────┴─────┐ │
 │  │             Agent                 │ │
-│  │  (always, even on foundry)       │ │
+│  │  (always, even on core)          │ │
 │  └──────────────┬───────────────────┘ │
 │                 │                      │
 │           ┌─────┴─────┐                │
@@ -134,14 +134,14 @@ When platform works locally, test multi-node on Debian:
 
 | VM | IP | Role |
 |----|-----|------|
-| foundry | 10.100.6.60 | Orchestrator + Agent |
+| core | 10.100.6.60 | Orchestrator + Agent |
 | server-1 | 10.100.6.61 | Agent only |
 
 ```bash
-# Deploy to foundry
-ssh foundry "cd /opt/ownprem/repo && git pull && npm run build"
+# Deploy to core
+ssh core "cd /opt/ownprem/repo && git pull && npm run build"
 
-# Deploy to server-1  
+# Deploy to server-1
 ssh server-1 "cd /opt/ownprem/repo && git pull && npm run build:agent"
 ```
 
@@ -151,9 +151,9 @@ ssh server-1 "cd /opt/ownprem/repo && git pull && npm run build:agent"
 
 2. **Agents are dumb** - Execute commands, write files, report status. No decisions.
 
-3. **Secrets stay in foundry** - Generated, encrypted, rendered into config files.
+3. **Secrets stay in orchestrator** - Generated, encrypted, rendered into config files.
 
-4. **Single entry point** - All app UIs accessed via foundry reverse proxy.
+4. **Single entry point** - All app UIs accessed via core server reverse proxy.
 
 ## Database
 
@@ -305,7 +305,7 @@ npm run test -- --grep "deployer"
 curl http://localhost:3001/api/servers
 
 # Test agent status
-curl http://localhost:3001/api/servers/foundry
+curl http://localhost:3001/api/servers/core
 
 # Check WebSocket
 npx wscat -c ws://localhost:3001
@@ -313,7 +313,7 @@ npx wscat -c ws://localhost:3001
 # Test full install flow with mock app
 curl -X POST http://localhost:3001/api/deployments \
   -H "Content-Type: application/json" \
-  -d '{"serverId": "foundry", "appName": "mock-app"}'
+  -d '{"serverId": "core", "appName": "mock-app"}'
 ```
 
 ## Troubleshooting
@@ -322,7 +322,7 @@ curl -X POST http://localhost:3001/api/deployments \
 # Check orchestrator logs
 npm run dev:orchestrator 2>&1 | tee orchestrator.log
 
-# Check agent logs  
+# Check agent logs
 npm run dev:agent 2>&1 | tee agent.log
 
 # Check database

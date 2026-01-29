@@ -2,6 +2,9 @@ import { useAuthStore } from '../stores/useAuthStore';
 
 const API_BASE = '/api';
 
+// Mutex to prevent concurrent token refresh attempts
+let refreshPromise: Promise<boolean> | null = null;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -24,14 +27,15 @@ function getAuthHeaders(): HeadersInit {
   return headers;
 }
 
-async function handleResponse<T>(response: Response): Promise<T> {
+async function handleResponse<T>(response: Response, retryFn?: () => Promise<Response>): Promise<T> {
   if (!response.ok) {
-    // Handle 401 - try to refresh token
-    if (response.status === 401) {
+    // Handle 401 - try to refresh token and retry
+    if (response.status === 401 && retryFn) {
       const refreshed = await tryRefreshToken();
       if (refreshed) {
-        // Token refreshed, but caller should retry the request
-        throw new ApiError(401, 'TOKEN_REFRESHED', 'Token refreshed, please retry');
+        // Token refreshed, retry the original request
+        const retryResponse = await retryFn();
+        return handleResponse<T>(retryResponse); // No retry function on retry to prevent infinite loops
       }
       // Refresh failed, logout
       useAuthStore.getState().logout();
@@ -53,39 +57,57 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 async function tryRefreshToken(): Promise<boolean> {
-  const { refreshToken, setTokens, logout } = useAuthStore.getState();
+  // Check for refresh token before acquiring mutex
+  const { refreshToken } = useAuthStore.getState();
   if (!refreshToken) return false;
 
-  try {
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
-    });
+  // If a refresh is already in progress, wait for it instead of starting a new one
+  // This prevents multiple concurrent refresh attempts creating multiple sessions
+  if (refreshPromise) {
+    return refreshPromise;
+  }
 
-    if (!res.ok) {
+  refreshPromise = (async () => {
+    const { refreshToken: token, setTokens, logout } = useAuthStore.getState();
+    if (!token) return false;
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: token }),
+      });
+
+      if (!res.ok) {
+        logout();
+        return false;
+      }
+
+      const data = await res.json();
+      setTokens(data.accessToken, data.refreshToken);
+      return true;
+    } catch {
       logout();
       return false;
+    } finally {
+      refreshPromise = null;
     }
+  })();
 
-    const data = await res.json();
-    setTokens(data.accessToken, data.refreshToken);
-    return true;
-  } catch {
-    logout();
-    return false;
-  }
+  return refreshPromise;
 }
 
 async function fetchWithAuth<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(url, {
+  const doFetch = () => fetch(url, {
     ...options,
     headers: {
       ...getAuthHeaders(),
       ...options.headers,
     },
   });
-  return handleResponse<T>(response);
+
+  const response = await doFetch();
+  return handleResponse<T>(response, doFetch);
 }
 
 export const api = {
@@ -249,6 +271,15 @@ export const api = {
 
   async getConnectionInfo(deploymentId: string) {
     return fetchWithAuth<ConnectionInfo>(`${API_BASE}/deployments/${deploymentId}/connection-info`);
+  },
+
+  async getDeploymentLogs(deploymentId: string, options?: { lines?: number; since?: string; grep?: string }) {
+    const params = new URLSearchParams();
+    if (options?.lines) params.set('lines', options.lines.toString());
+    if (options?.since) params.set('since', options.since);
+    if (options?.grep) params.set('grep', options.grep);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return fetchWithAuth<LogsResponse>(`${API_BASE}/deployments/${deploymentId}/logs${query}`);
   },
 
   // Services
@@ -630,4 +661,14 @@ export interface ConnectionInfo {
   serverId: string;
   status: string;
   services: ServiceConnectionInfo[];
+}
+
+export interface LogsResponse {
+  appName: string;
+  serverId: string;
+  logs: string[];
+  source: 'journalctl' | 'file';
+  hasMore: boolean;
+  status: 'success' | 'error';
+  message?: string;
 }

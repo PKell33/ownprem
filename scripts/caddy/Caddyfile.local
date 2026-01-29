@@ -2,7 +2,7 @@
 # Self-signed HTTPS for local testing
 #
 # Usage:
-#   1. Add "127.0.0.1 foundry.local" to /etc/hosts
+#   1. Add "127.0.0.1 ownprem.local" to /etc/hosts
 #   2. caddy run --config Caddyfile.local
 #   3. Accept the self-signed certificate in your browser
 
@@ -12,7 +12,7 @@
 	auto_https disable_redirects
 }
 
-foundry.local {
+ownprem.local {
 	# TLS with self-signed cert
 	tls internal
 
@@ -66,7 +66,7 @@ foundry.local {
 }
 
 # Alternative: Proxy to Vite dev server (uncomment for hot reload)
-# foundry.local {
+# ownprem.local {
 # 	tls internal
 #
 # 	# API and WebSocket to orchestrator

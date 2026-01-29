@@ -87,6 +87,10 @@ configSchema:
     generated: true
     secret: true
 
+logging:
+  logFile: "${appDir}/logs/mempool.log"
+  serviceName: mempool
+
 resources:
   minDisk: 20GB
   minMemory: 4GB

@@ -2,7 +2,7 @@
 # Automatic HTTPS with Let's Encrypt
 #
 # Usage:
-#   1. Replace {$DOMAIN} with your domain (e.g., foundry.example.com)
+#   1. Replace {$DOMAIN} with your domain (e.g., ownprem.example.com)
 #   2. Copy to /etc/caddy/Caddyfile
 #   3. sudo systemctl reload caddy
 
@@ -15,7 +15,7 @@
 }
 
 # Main site
-{$DOMAIN:foundry.localhost} {
+{$DOMAIN:ownprem.localhost} {
 	# Security headers
 	header {
 		# HSTS
@@ -94,6 +94,6 @@
 }
 
 # Optional: Redirect www to non-www
-www.{$DOMAIN:foundry.localhost} {
-	redir https://{$DOMAIN:foundry.localhost}{uri} permanent
+www.{$DOMAIN:ownprem.localhost} {
+	redir https://{$DOMAIN:ownprem.localhost}{uri} permanent
 }

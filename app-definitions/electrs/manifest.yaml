@@ -65,6 +65,10 @@ configSchema:
     description: Number of blocks to index per batch
     default: 10
 
+logging:
+  logFile: "${appDir}/logs/electrs.log"
+  serviceName: electrs
+
 resources:
   minDisk: 50GB
   minMemory: 4GB

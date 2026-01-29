@@ -7,6 +7,7 @@ import { createError } from '../middleware/error.js';
 import { validateBody, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { authService } from '../../services/authService.js';
+import { requestLogs } from '../../websocket/agentHandler.js';
 import type { AppManifest } from '@ownprem/shared';
 
 const router = Router();
@@ -242,6 +243,47 @@ router.post('/:id/restart', requireAuth, canOperateDeployment, async (req, res, 
   try {
     const deployment = await deployer.restart(req.params.id);
     res.json(deployment);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/deployments/:id/logs - Get logs for the app (admin or operator for the group)
+router.get('/:id/logs', requireAuth, canOperateDeployment, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const deployment = await deployer.getDeployment(req.params.id);
+    if (!deployment) {
+      throw createError('Deployment not found', 404, 'DEPLOYMENT_NOT_FOUND');
+    }
+
+    // Get the manifest for logging config
+    const db = getDb();
+    const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(deployment.appName) as AppRegistryRow | undefined;
+    const manifest = appRow ? JSON.parse(appRow.manifest) as AppManifest : null;
+
+    // Parse query params
+    const lines = Math.min(parseInt(req.query.lines as string) || 100, 1000);
+    const since = req.query.since as string | undefined;
+    const grep = req.query.grep as string | undefined;
+
+    // Request logs from the agent
+    const result = await requestLogs(deployment.serverId, deployment.appName, {
+      lines,
+      since,
+      grep,
+      logPath: manifest?.logging?.logFile,
+      serviceName: manifest?.logging?.serviceName,
+    });
+
+    res.json({
+      appName: deployment.appName,
+      serverId: deployment.serverId,
+      logs: result.logs,
+      source: result.source,
+      hasMore: result.hasMore,
+      status: result.status,
+      message: result.message,
+    });
   } catch (err) {
     next(err);
   }

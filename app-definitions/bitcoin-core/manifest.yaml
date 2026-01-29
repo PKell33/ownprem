@@ -39,6 +39,10 @@ tor:
     virtualPort: 8332
     targetPort: 8332
 
+logging:
+  logFile: "${appDir}/logs/bitcoin-core.log"
+  serviceName: bitcoind
+
 configSchema:
   - name: network
     type: select

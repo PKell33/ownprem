@@ -135,7 +135,7 @@ install_agent() {
         chmod 600 "$CONFIG_DIR/agent.env"
         chown "$OWNPREM_USER:$OWNPREM_GROUP" "$CONFIG_DIR/agent.env"
 
-        log_warn "Please configure SERVER_ID and FOUNDRY_URL in $CONFIG_DIR/agent.env"
+        log_warn "Please configure SERVER_ID and ORCHESTRATOR_URL in $CONFIG_DIR/agent.env"
     else
         log_info "Environment file exists: $CONFIG_DIR/agent.env"
     fi
@@ -181,7 +181,7 @@ if [[ "$INSTALL_TYPE" == "agent" || "$INSTALL_TYPE" == "both" ]]; then
     echo "Agent:"
     echo "  1. Configure: $CONFIG_DIR/agent.env"
     echo "     - Set SERVER_ID (unique per server)"
-    echo "     - Set FOUNDRY_URL (orchestrator address)"
+    echo "     - Set ORCHESTRATOR_URL (orchestrator address)"
     echo "     - Set AUTH_TOKEN (from orchestrator)"
     echo "  2. Start service: systemctl start ownprem-agent"
     echo "  3. Check status: systemctl status ownprem-agent"

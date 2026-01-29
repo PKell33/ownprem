@@ -7,6 +7,14 @@ DATA_DIR="${DATA_DIR:-/var/lib/mempool}"
 VERSION="${APP_VERSION:-3.0.0}"
 BUILD_DIR="/tmp/mempool-build"
 
+# Dev mode: skip actual installation (building takes several minutes)
+if [ "${DEV_MODE:-}" = "true" ] || [ ! -w "/opt" ]; then
+  echo "Mempool ${VERSION} installed (dev/mock mode)!"
+  mkdir -p "$APP_DIR"
+  mkdir -p "$DATA_DIR"
+  exit 0
+fi
+
 echo "Installing Mempool ${VERSION}..."
 echo "APP_DIR: $APP_DIR"
 echo "DATA_DIR: $DATA_DIR"

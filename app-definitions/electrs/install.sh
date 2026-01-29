@@ -7,6 +7,14 @@ DATA_DIR="${DATA_DIR:-/var/lib/electrs}"
 VERSION="${APP_VERSION:-0.10.6}"
 BUILD_DIR="/tmp/electrs-build"
 
+# Dev mode: skip actual installation (building takes 10-20 minutes)
+if [ "${DEV_MODE:-}" = "true" ] || [ ! -w "/opt" ]; then
+  echo "Electrs ${VERSION} installed (dev/mock mode)!"
+  mkdir -p "$APP_DIR"
+  mkdir -p "$DATA_DIR"
+  exit 0
+fi
+
 echo "Installing Electrs ${VERSION}..."
 echo "APP_DIR: $APP_DIR"
 echo "DATA_DIR: $DATA_DIR"

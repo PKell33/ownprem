@@ -45,7 +45,7 @@ export default function AppCard({ app, deployment, conflictsWith, onClick }: App
         <h3 className="font-semibold text-lg mb-1">{app.displayName}</h3>
 
         {/* Version */}
-        <p className="text-sm text-gray-400 dark:text-gray-500 mb-2">v{app.version}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">v{app.version}</p>
 
         {/* Brief Description - truncated to 2 lines */}
         <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">

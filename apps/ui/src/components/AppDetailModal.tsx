@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { ExternalLink, Play, Square, RotateCw, Trash2, Download, Github, GitBranch, Users, Link, Ban } from 'lucide-react';
+import { ExternalLink, Play, Square, RotateCw, Trash2, Download, Github, GitBranch, Users, Link, Ban, FileText, Settings } from 'lucide-react';
 import type { AppManifest, Deployment } from '../api/client';
 import StatusBadge from './StatusBadge';
 import AppIcon from './AppIcon';
 import Modal from './Modal';
 import ConnectionInfoModal from './ConnectionInfoModal';
+import LogViewerModal from './LogViewerModal';
+import EditConfigModal from './EditConfigModal';
 
 interface AppDetailModalProps {
   app: AppManifest;
@@ -18,6 +20,7 @@ interface AppDetailModalProps {
   onStop?: () => void;
   onRestart?: () => void;
   onUninstall?: () => void;
+  onConfigSaved?: () => void;
   canManage?: boolean;
   canOperate?: boolean;
 }
@@ -34,16 +37,20 @@ export default function AppDetailModal({
   onStop,
   onRestart,
   onUninstall,
+  onConfigSaved,
   canManage = true,
   canOperate = true,
 }: AppDetailModalProps) {
   const [showConnectionInfo, setShowConnectionInfo] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [showEditConfig, setShowEditConfig] = useState(false);
 
   const isInstalled = !!deployment;
   const isRunning = deployment?.status === 'running';
   const canControl = isInstalled && !['installing', 'configuring', 'uninstalling'].includes(deployment?.status || '');
   const hasServices = app.provides && app.provides.length > 0;
   const isBlocked = !isInstalled && !!conflictsWith;
+  const hasEditableConfig = app.configSchema?.some(f => !f.generated && !f.inheritFrom) ?? false;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="" size="lg">
@@ -139,6 +146,24 @@ export default function AppDetailModal({
                   Connection Info
                 </button>
               )}
+              {isInstalled && hasEditableConfig && canManage && (
+                <button
+                  onClick={() => setShowEditConfig(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-white rounded-lg transition-colors"
+                >
+                  <Settings size={18} />
+                  Settings
+                </button>
+              )}
+              {isInstalled && canOperate && (
+                <button
+                  onClick={() => setShowLogs(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-white rounded-lg transition-colors"
+                >
+                  <FileText size={18} />
+                  View Logs
+                </button>
+              )}
               {canControl && canManage && (
                 <button
                   onClick={onUninstall}
@@ -156,7 +181,7 @@ export default function AppDetailModal({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-200 dark:border-gray-700">
           {/* Source */}
           <div>
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Source</h3>
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Source</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
                 {app.source.type === 'binary' && <Download size={14} />}
@@ -180,7 +205,7 @@ export default function AppDetailModal({
 
           {/* Category */}
           <div>
-            <h3 className="text-sm font-medium text-gray-300 mb-3">Category</h3>
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Category</h3>
             <span className="inline-block px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-sm capitalize">
               {app.category}
             </span>
@@ -189,12 +214,12 @@ export default function AppDetailModal({
           {/* Services Provided */}
           {app.provides && app.provides.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-gray-300 mb-3">Services Provided</h3>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Services Provided</h3>
               <div className="space-y-2">
                 {app.provides.map((service) => (
                   <div key={service.name} className="flex items-center justify-between text-sm bg-gray-100 dark:bg-gray-900 px-3 py-2 rounded-lg">
                     <span className="text-gray-700 dark:text-gray-300">{service.name}</span>
-                    <span className="text-gray-500">:{service.port} ({service.protocol})</span>
+                    <span className="text-gray-500 dark:text-gray-400">:{service.port} ({service.protocol})</span>
                   </div>
                 ))}
               </div>
@@ -204,12 +229,12 @@ export default function AppDetailModal({
           {/* Dependencies */}
           {app.requires && app.requires.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-gray-300 mb-3">Dependencies</h3>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Dependencies</h3>
               <div className="space-y-2">
                 {app.requires.map((req) => (
                   <div key={req.service} className="flex items-center justify-between text-sm bg-gray-100 dark:bg-gray-900 px-3 py-2 rounded-lg">
                     <span className="text-gray-700 dark:text-gray-300">{req.service}</span>
-                    <span className="text-gray-500 text-xs">{req.locality}</span>
+                    <span className="text-gray-500 dark:text-gray-400 text-xs">{req.locality}</span>
                   </div>
                 ))}
               </div>
@@ -219,8 +244,8 @@ export default function AppDetailModal({
           {/* Conflicts */}
           {app.conflicts && app.conflicts.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-gray-300 mb-3">Conflicts With</h3>
-              <p className="text-xs text-gray-500 mb-2">Only one of these can be installed at a time</p>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Conflicts With</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Only one of these can be installed at a time</p>
               <div className="flex flex-wrap gap-2">
                 {app.conflicts.map((conflict) => (
                   <span key={conflict} className="text-xs bg-red-900/30 text-red-400 px-2 py-1 rounded">
@@ -234,7 +259,7 @@ export default function AppDetailModal({
           {/* Resources */}
           {app.resources && (app.resources.minDisk || app.resources.minMemory) && (
             <div>
-              <h3 className="text-sm font-medium text-gray-300 mb-3">Requirements</h3>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Requirements</h3>
               <div className="flex gap-4 text-sm text-gray-500 dark:text-gray-400">
                 {app.resources.minDisk && <span>Disk: {app.resources.minDisk}</span>}
                 {app.resources.minMemory && <span>Memory: {app.resources.minMemory}</span>}
@@ -250,6 +275,27 @@ export default function AppDetailModal({
           deploymentId={deployment.id}
           isOpen={showConnectionInfo}
           onClose={() => setShowConnectionInfo(false)}
+        />
+      )}
+
+      {/* Log Viewer Modal */}
+      {deployment && (
+        <LogViewerModal
+          deploymentId={deployment.id}
+          appName={app.displayName}
+          isOpen={showLogs}
+          onClose={() => setShowLogs(false)}
+        />
+      )}
+
+      {/* Edit Config Modal */}
+      {deployment && (
+        <EditConfigModal
+          deployment={deployment}
+          app={app}
+          isOpen={showEditConfig}
+          onClose={() => setShowEditConfig(false)}
+          onSaved={onConfigSaved}
         />
       )}
     </Modal>

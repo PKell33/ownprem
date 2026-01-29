@@ -21,7 +21,7 @@ SERVER_ID=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --orchestrator|--foundry)
+    --orchestrator)
       ORCHESTRATOR_URL="$2"
       shift 2
       ;;

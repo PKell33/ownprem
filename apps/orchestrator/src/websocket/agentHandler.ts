@@ -3,7 +3,7 @@ import { timingSafeEqual, createHash } from 'crypto';
 import { getDb } from '../db/index.js';
 import { wsLogger } from '../lib/logger.js';
 import { authService } from '../services/authService.js';
-import type { AgentStatusReport, CommandResult, ServerMetrics } from '@ownprem/shared';
+import type { AgentStatusReport, CommandResult, ServerMetrics, LogResult } from '@ownprem/shared';
 
 interface AgentAuth {
   serverId?: string;
@@ -27,6 +27,13 @@ interface AgentConnection {
 }
 
 const connectedAgents = new Map<string, AgentConnection>();
+
+// Pending log requests - maps commandId to resolve/reject callbacks
+const pendingLogRequests = new Map<string, {
+  resolve: (result: LogResult) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+}>();
 
 // Heartbeat configuration
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
@@ -94,7 +101,7 @@ export function setupAgentHandler(io: SocketServer): void {
       return;
     }
 
-    // Foundry doesn't need a token (local connection)
+    // Core server doesn't need a token (local connection)
     // For other servers, verify the token
     if (!server.is_core) {
       if (!token || !server.auth_token) {
@@ -165,6 +172,11 @@ export function setupAgentHandler(io: SocketServer): void {
     // Handle command results from agent
     socket.on('command:result', (result: CommandResult) => {
       handleCommandResult(io, serverId, result);
+    });
+
+    // Handle log results from agent
+    socket.on('logs:result', (result: LogResult) => {
+      handleLogResult(serverId, result);
     });
 
     // Handle disconnect
@@ -345,6 +357,54 @@ function getDeploymentStatusFromCommand(action: string, resultStatus: string): s
     default:
       return null;
   }
+}
+
+function handleLogResult(serverId: string, result: LogResult): void {
+  const pending = pendingLogRequests.get(result.commandId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingLogRequests.delete(result.commandId);
+    pending.resolve(result);
+  }
+
+  wsLogger.debug({
+    commandId: result.commandId,
+    serverId,
+    status: result.status,
+    lineCount: result.logs.length,
+  }, 'Log result received');
+}
+
+export async function requestLogs(
+  serverId: string,
+  appName: string,
+  options: { lines?: number; since?: string; grep?: string; logPath?: string; serviceName?: string } = {},
+  timeoutMs: number = 30000
+): Promise<LogResult> {
+  const conn = connectedAgents.get(serverId);
+  if (!conn) {
+    throw new Error(`Agent not connected: ${serverId}`);
+  }
+
+  const commandId = `logs-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingLogRequests.delete(commandId);
+      reject(new Error('Log request timed out'));
+    }, timeoutMs);
+
+    pendingLogRequests.set(commandId, { resolve, reject, timeout });
+
+    conn.socket.emit('command', {
+      id: commandId,
+      action: 'getLogs',
+      appName,
+      payload: { logOptions: options },
+    });
+
+    wsLogger.info({ serverId, appName, commandId }, 'Log request sent');
+  });
 }
 
 export function sendCommand(serverId: string, command: { id: string; action: string; appName: string; payload?: unknown }, deploymentId?: string): boolean {

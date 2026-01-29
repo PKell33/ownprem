@@ -17,7 +17,8 @@ class Agent {
     private authToken: string | null
   ) {
     const appsDir = process.env.APPS_DIR || '/opt/ownprem/apps';
-    this.executor = new Executor(appsDir);
+    const dataDir = process.env.DATA_DIR || undefined; // Let Executor determine default
+    this.executor = new Executor(appsDir, dataDir);
     this.reporter = new Reporter(serverId);
 
     this.connection = new Connection({
@@ -79,6 +80,14 @@ class Agent {
         case 'uninstall':
           await this.executor.uninstall(cmd.appName);
           break;
+        case 'getLogs': {
+          const logResult = await this.executor.getLogs(cmd.appName, cmd.payload?.logOptions);
+          this.connection.sendLogResult({
+            commandId: cmd.id,
+            ...logResult,
+          });
+          return; // Don't send normal command result for logs
+        }
         default:
           throw new Error(`Unknown action: ${cmd.action}`);
       }
@@ -124,7 +133,7 @@ class Agent {
 
 // Entry point
 const serverId = process.env.SERVER_ID || 'core';
-const orchestratorUrl = process.env.ORCHESTRATOR_URL || process.env.FOUNDRY_URL || 'http://localhost:3001';
+const orchestratorUrl = process.env.ORCHESTRATOR_URL || 'http://localhost:3001';
 const authToken = process.env.AUTH_TOKEN || null;
 
 const agent = new Agent(serverId, orchestratorUrl, authToken);

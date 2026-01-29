@@ -181,11 +181,11 @@ class AuthService {
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, CURRENT_TIMESTAMP)
     `).run(id, userId, tokenHash, expiresAt, sessionMeta?.ipAddress || null, sessionMeta?.userAgent || null);
 
-    // Clean up old tokens for this user (keep last 10 sessions)
+    // Clean up old tokens for this user (keep last 5 sessions)
     db.prepare(`
       DELETE FROM refresh_tokens
       WHERE user_id = ? AND id NOT IN (
-        SELECT id FROM refresh_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 10
+        SELECT id FROM refresh_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 5
       )
     `).run(userId, userId);
   }

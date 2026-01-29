@@ -79,7 +79,7 @@ export default function ServerCard({ server, deploymentCount = 0, onClick, onDel
                   setConfirmDelete(false);
                   setConfirmRegenerate(false);
                 }}
-                className="p-1 rounded hover:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
               >
                 <MoreVertical size={16} />
               </button>
