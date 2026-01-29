@@ -54,7 +54,7 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res) => {
         user: {
           userId: user.id,
           username: user.username,
-          isSystemAdmin: user.is_system_admin,
+          isSystemAdmin: !!user.is_system_admin,
           groups: authService.getUserGroups(user.id),
         },
         totpSetupRequired: true,
@@ -74,7 +74,7 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res) => {
       user: {
         userId: user.id,
         username: user.username,
-        isSystemAdmin: user.is_system_admin,
+        isSystemAdmin: !!user.is_system_admin,
         groups: authService.getUserGroups(user.id),
       },
       ...tokens,
@@ -134,7 +134,7 @@ router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req,
       user: {
         userId: user.id,
         username: user.username,
-        isSystemAdmin: user.is_system_admin,
+        isSystemAdmin: !!user.is_system_admin,
         groups: authService.getUserGroups(user.id),
       },
       ...tokens,
@@ -234,7 +234,7 @@ router.get('/me', requireAuth, (req: AuthenticatedRequest, res) => {
   res.json({
     userId: user.id,
     username: user.username,
-    isSystemAdmin: user.is_system_admin,
+    isSystemAdmin: !!user.is_system_admin,
     groups: authService.getUserGroups(user.id),
     totpEnabled: user.totp_enabled,
     totpRequired: authService.userRequiresTotp(user.id),
