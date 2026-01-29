@@ -144,7 +144,7 @@ class AuthService {
     const payload: TokenPayload = {
       userId: user.id,
       username: user.username,
-      isSystemAdmin: user.is_system_admin,
+      isSystemAdmin: Boolean(user.is_system_admin),
     };
 
     const accessToken = jwt.sign(payload, this.getJwtSecret(), {

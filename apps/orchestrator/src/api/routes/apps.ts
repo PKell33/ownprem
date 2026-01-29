@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { createError } from '../middleware/error.js';
+import { requireAuth } from '../middleware/auth.js';
 import { AppManifestSchema } from '@ownprem/shared';
 import type { AppManifest } from '@ownprem/shared';
 
@@ -74,7 +75,7 @@ function syncAppRegistry(): void {
 }
 
 // GET /api/apps - List available apps
-router.get('/', (_req, res) => {
+router.get('/', requireAuth, (_req, res) => {
   syncAppRegistry();
 
   const db = getDb();
@@ -89,7 +90,7 @@ router.get('/', (_req, res) => {
 });
 
 // GET /api/apps/:name - Get app manifest
-router.get('/:name', (req, res) => {
+router.get('/:name', requireAuth, (req, res) => {
   syncAppRegistry();
 
   const db = getDb();
@@ -103,7 +104,7 @@ router.get('/:name', (req, res) => {
 });
 
 // GET /api/apps/:name/versions - Get available versions
-router.get('/:name/versions', (req, res) => {
+router.get('/:name/versions', requireAuth, (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT * FROM app_registry WHERE name = ?').get(req.params.name) as AppRegistryRow | undefined;
 

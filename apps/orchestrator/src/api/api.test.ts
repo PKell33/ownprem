@@ -29,6 +29,12 @@ vi.mock('../config.js', () => ({
       apps: '/tmp/test-apps',
       appDefinitions: join(__dirname, '../../../app-definitions'),
       logs: '/tmp/test-logs',
+      caddyConfig: '/tmp/test-caddy/Caddyfile',
+    },
+    caddy: {
+      domain: 'test.local',
+      reloadCommand: '',
+      devUiPort: 5173,
     },
     secrets: { key: 'test-secrets-key-32-characters!!' },
     jwt: {
@@ -40,6 +46,7 @@ vi.mock('../config.js', () => ({
       bcryptRounds: 4,
       rateLimitWindow: 15 * 60 * 1000,
       rateLimitMax: 100,
+      authRateLimitMax: 10,
     },
     cors: { origin: '*' },
   },

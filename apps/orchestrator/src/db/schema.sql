@@ -180,6 +180,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
 
+-- System settings for installation-specific values
+CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance indexes for frequently queried columns
+CREATE INDEX IF NOT EXISTS idx_deployments_status ON deployments(status);
+CREATE INDEX IF NOT EXISTS idx_command_log_status ON command_log(status);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+
 -- Initialize core server on first run
 INSERT OR IGNORE INTO servers (id, name, is_core, agent_status)
 VALUES ('core', 'core', TRUE, 'offline');

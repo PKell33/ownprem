@@ -6,10 +6,37 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
+const ENCRYPTION_SALT_KEY = 'encryption_salt';
 
 export class SecretsManager {
   private key: Buffer | null = null;
   private initialized: boolean = false;
+
+  /**
+   * Get or generate a unique salt for this installation.
+   * The salt is stored in the database and persists across restarts.
+   */
+  private getOrCreateSalt(): Buffer {
+    const db = getDb();
+
+    // Try to get existing salt
+    const row = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(ENCRYPTION_SALT_KEY) as { value: string } | undefined;
+
+    if (row) {
+      return Buffer.from(row.value, 'base64');
+    }
+
+    // Generate new salt for this installation
+    const salt = randomBytes(SALT_LENGTH);
+    const saltB64 = salt.toString('base64');
+
+    db.prepare(`
+      INSERT INTO system_settings (key, value, created_at, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).run(ENCRYPTION_SALT_KEY, saltB64);
+
+    return salt;
+  }
 
   /**
    * Validate secrets configuration at startup
@@ -37,9 +64,9 @@ export class SecretsManager {
       if (secretsKey.length < 32) {
         throw new Error('SECRETS_KEY must be at least 32 characters long');
       }
-      // Derive a key from the configured secret using a static salt
-      // Note: In a real production system, you might want to use a unique salt
-      this.key = scryptSync(secretsKey, 'ownprem-secrets-v1', 32);
+      // Derive a key using a unique salt for this installation
+      const salt = this.getOrCreateSalt();
+      this.key = scryptSync(secretsKey, salt, 32);
     }
 
     this.initialized = true;

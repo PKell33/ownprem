@@ -1,5 +1,6 @@
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { randomBytes } from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -11,6 +12,29 @@ const DEFAULT_BCRYPT_ROUNDS = 12;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const RATE_LIMIT_MAX_REQUESTS = 100;
 const AUTH_RATE_LIMIT_MAX = 10; // Stricter limit for auth endpoints
+
+/**
+ * Get JWT secret - generates ephemeral secret for dev mode, requires env var for production
+ */
+function getJwtSecret(): string {
+  const envSecret = process.env.JWT_SECRET;
+
+  if (envSecret) {
+    return envSecret;
+  }
+
+  if (isDevelopment) {
+    // Generate random ephemeral secret for development
+    // This is logged at startup so developers know sessions won't persist
+    return randomBytes(32).toString('base64');
+  }
+
+  // In production, JWT_SECRET is required
+  throw new Error(
+    'JWT_SECRET environment variable is required in production. ' +
+    'Generate one with: openssl rand -base64 32'
+  );
+}
 
 export const config = {
   port: parseInt(process.env.PORT || String(DEFAULT_PORT), 10),
@@ -40,7 +64,7 @@ export const config = {
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || (isDevelopment ? 'dev-jwt-secret-change-in-production' : ''),
+    secret: getJwtSecret(),
     accessTokenExpiry: '15m',
     refreshTokenExpiry: '7d',
   },
