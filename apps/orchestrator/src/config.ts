@@ -5,8 +5,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const isDevelopment = (process.env.NODE_ENV || 'development') === 'development';
 
+// Default values
+const DEFAULT_PORT = 3001;
+const DEFAULT_BCRYPT_ROUNDS = 12;
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX_REQUESTS = 100;
+const AUTH_RATE_LIMIT_MAX = 10; // Stricter limit for auth endpoints
+
 export const config = {
-  port: parseInt(process.env.PORT || '3001', 10),
+  port: parseInt(process.env.PORT || String(DEFAULT_PORT), 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   isDevelopment,
 
@@ -25,6 +32,7 @@ export const config = {
   caddy: {
     domain: process.env.CADDY_DOMAIN || 'ownprem.local',
     reloadCommand: process.env.CADDY_RELOAD_CMD || (isDevelopment ? '' : 'systemctl reload caddy'),
+    devUiPort: parseInt(process.env.DEV_UI_PORT || '5173', 10),
   },
 
   secrets: {
@@ -38,9 +46,10 @@ export const config = {
   },
 
   security: {
-    bcryptRounds: 12,
-    rateLimitWindow: 15 * 60 * 1000, // 15 minutes
-    rateLimitMax: 100, // requests per window
+    bcryptRounds: DEFAULT_BCRYPT_ROUNDS,
+    rateLimitWindow: RATE_LIMIT_WINDOW_MS,
+    rateLimitMax: RATE_LIMIT_MAX_REQUESTS,
+    authRateLimitMax: AUTH_RATE_LIMIT_MAX,
   },
 
   cors: {

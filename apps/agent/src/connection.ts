@@ -1,9 +1,12 @@
 import { io, Socket } from 'socket.io-client';
 import type { AgentCommand, AgentStatusReport } from '@ownprem/shared';
 
+const RECONNECTION_DELAY_MS = 5000;
+const RECONNECTION_DELAY_MAX_MS = 30000;
+
 export interface ConnectionOptions {
   serverId: string;
-  foundryUrl: string;
+  orchestratorUrl: string;
   authToken: string | null;
   onCommand: (command: AgentCommand) => Promise<void>;
   onConnect: () => void;
@@ -19,26 +22,26 @@ export class Connection {
   }
 
   connect(): void {
-    console.log(`Connecting to ${this.options.foundryUrl} as ${this.options.serverId}...`);
+    console.log(`Connecting to ${this.options.orchestratorUrl} as ${this.options.serverId}...`);
 
-    this.socket = io(this.options.foundryUrl, {
+    this.socket = io(this.options.orchestratorUrl, {
       auth: {
         serverId: this.options.serverId,
         token: this.options.authToken,
       },
       reconnection: true,
-      reconnectionDelay: 5000,
-      reconnectionDelayMax: 30000,
+      reconnectionDelay: RECONNECTION_DELAY_MS,
+      reconnectionDelayMax: RECONNECTION_DELAY_MAX_MS,
       reconnectionAttempts: Infinity,
     });
 
     this.socket.on('connect', () => {
-      console.log(`Connected to foundry as ${this.options.serverId}`);
+      console.log(`Connected to orchestrator as ${this.options.serverId}`);
       this.options.onConnect();
     });
 
     this.socket.on('disconnect', (reason) => {
-      console.log(`Disconnected from foundry: ${reason}`);
+      console.log(`Disconnected from orchestrator: ${reason}`);
       this.options.onDisconnect();
     });
 

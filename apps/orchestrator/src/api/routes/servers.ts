@@ -84,7 +84,7 @@ router.post('/', requireAuth, canManageServers, validateBody(schemas.servers.cre
   const server = rowToServer(row);
 
   // Return bootstrap command for the new server (using raw token, not hashed)
-  const bootstrapCommand = `curl -sSL http://${req.get('host')}/agent/install.sh | sudo bash -s -- --foundry http://${req.get('host')} --token ${rawAuthToken} --id ${id}`;
+  const bootstrapCommand = `curl -sSL http://${req.get('host')}/agent/install.sh | sudo bash -s -- --orchestrator http://${req.get('host')} --token ${rawAuthToken} --id ${id}`;
 
   res.status(201).json({
     server,
@@ -185,7 +185,7 @@ router.post('/:id/regenerate-token', requireAuth, canManageServers, (req, res) =
   `).run(hashedAuthToken, req.params.id);
 
   // Return bootstrap command with the new token
-  const bootstrapCommand = `curl -sSL http://${req.get('host')}/agent/install.sh | sudo bash -s -- --foundry http://${req.get('host')} --token ${rawAuthToken} --id ${req.params.id}`;
+  const bootstrapCommand = `curl -sSL http://${req.get('host')}/agent/install.sh | sudo bash -s -- --orchestrator http://${req.get('host')} --token ${rawAuthToken} --id ${req.params.id}`;
 
   res.json({
     server: rowToServer(db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow),

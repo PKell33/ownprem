@@ -53,8 +53,8 @@ export function createApi(): express.Application {
 
   // Stricter rate limit for auth endpoints
   const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // 10 login attempts per window
+    windowMs: config.security.rateLimitWindow,
+    max: config.security.authRateLimitMax,
     standardHeaders: true,
     legacyHeaders: false,
     message: {

@@ -429,8 +429,9 @@ ${tcpBlocks}
   generateDevConfig(serviceRoutes: ServiceRoute[] = []): string {
     const httpRoutes = serviceRoutes.filter(r => r.routeType === 'http');
     const tcpRoutes = serviceRoutes.filter(r => r.routeType === 'tcp');
+    const devUiPort = config.caddy.devUiPort;
 
-    let config = `# OwnPrem Development Caddyfile
+    let caddyConfig = `# OwnPrem Development Caddyfile
 # Proxies to Vite dev server and API
 
 {
@@ -462,7 +463,7 @@ ${this.domain} {
 
     // Add HTTP service routes
     for (const route of httpRoutes) {
-      config += `
+      caddyConfig += `
   # ${route.serviceName} (${route.appName})
   handle ${route.externalPath}/* {
     uri strip_prefix ${route.externalPath}
@@ -471,24 +472,24 @@ ${this.domain} {
 `;
     }
 
-    config += `
+    caddyConfig += `
   # Everything else to Vite dev server
   handle {
-    reverse_proxy localhost:5173
+    reverse_proxy localhost:${devUiPort}
   }
 }
 `;
 
     // Add TCP service routes (layer4)
     if (tcpRoutes.length > 0) {
-      config += `
+      caddyConfig += `
 # ========================================
 # TCP Service Proxying (requires layer4 module)
 # ========================================
 
 `;
       for (const route of tcpRoutes) {
-        config += `# ${route.serviceName} (${route.appName})
+        caddyConfig += `# ${route.serviceName} (${route.appName})
 :${route.externalPort} {
   route {
     proxy ${route.upstreamHost}:${route.upstreamPort}
@@ -498,7 +499,7 @@ ${this.domain} {
       }
     }
 
-    return config;
+    return caddyConfig;
   }
 
   // ==================== Connection Info Helpers ====================

@@ -13,7 +13,7 @@ class Agent {
 
   constructor(
     private serverId: string,
-    private foundryUrl: string,
+    private orchestratorUrl: string,
     private authToken: string | null
   ) {
     const appsDir = process.env.APPS_DIR || '/opt/ownprem/apps';
@@ -22,7 +22,7 @@ class Agent {
 
     this.connection = new Connection({
       serverId,
-      foundryUrl,
+      orchestratorUrl,
       authToken,
       onCommand: (cmd) => this.handleCommand(cmd),
       onConnect: () => this.onConnect(),
@@ -33,7 +33,7 @@ class Agent {
   async start(): Promise<void> {
     console.log(`Starting Ownprem Agent...`);
     console.log(`Server ID: ${this.serverId}`);
-    console.log(`Foundry URL: ${this.foundryUrl}`);
+    console.log(`Orchestrator URL: ${this.orchestratorUrl}`);
 
     this.connection.connect();
   }
@@ -124,10 +124,10 @@ class Agent {
 
 // Entry point
 const serverId = process.env.SERVER_ID || 'core';
-const foundryUrl = process.env.FOUNDRY_URL || 'http://localhost:3001';
+const orchestratorUrl = process.env.ORCHESTRATOR_URL || process.env.FOUNDRY_URL || 'http://localhost:3001';
 const authToken = process.env.AUTH_TOKEN || null;
 
-const agent = new Agent(serverId, foundryUrl, authToken);
+const agent = new Agent(serverId, orchestratorUrl, authToken);
 agent.start().catch((err) => {
   console.error('Failed to start agent:', err);
   process.exit(1);

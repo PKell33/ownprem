@@ -2,7 +2,7 @@
 set -e
 
 # Ownprem Agent Installer
-# Usage: curl -sSL http://foundry/agent/install.sh | sudo bash -s -- --foundry http://foundry:3001 --token TOKEN --id server-1
+# Usage: curl -sSL http://ownprem/agent/install.sh | sudo bash -s -- --orchestrator http://ownprem:3001 --token TOKEN --id server-1
 
 # Colors for output
 RED='\033[0;31m'
@@ -15,14 +15,14 @@ warn() { echo -e "${YELLOW}[ownprem]${NC} $1"; }
 error() { echo -e "${RED}[ownprem]${NC} $1" >&2; }
 
 # Parse arguments
-FOUNDRY_URL=""
+ORCHESTRATOR_URL=""
 AUTH_TOKEN=""
 SERVER_ID=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --foundry)
-      FOUNDRY_URL="$2"
+    --orchestrator|--foundry)
+      ORCHESTRATOR_URL="$2"
       shift 2
       ;;
     --token)
@@ -41,8 +41,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate required arguments
-if [[ -z "$FOUNDRY_URL" ]]; then
-  error "Missing required argument: --foundry"
+if [[ -z "$ORCHESTRATOR_URL" ]]; then
+  error "Missing required argument: --orchestrator"
   exit 1
 fi
 
@@ -63,7 +63,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 log "Installing Ownprem Agent..."
-log "  Foundry URL: $FOUNDRY_URL"
+log "  Orchestrator URL: $ORCHESTRATOR_URL"
 log "  Server ID: $SERVER_ID"
 
 # Detect OS
@@ -128,7 +128,7 @@ npm run build --workspace=@ownprem/agent --quiet
 log "Configuring agent..."
 cat > /opt/ownprem/agent.env << EOF
 # Ownprem Agent Configuration
-FOUNDRY_URL=$FOUNDRY_URL
+ORCHESTRATOR_URL=$ORCHESTRATOR_URL
 SERVER_ID=$SERVER_ID
 AUTH_TOKEN=$AUTH_TOKEN
 APPS_DIR=/opt/ownprem/apps
