@@ -1,7 +1,7 @@
 name: electrs
 displayName: Electrs
 description: Efficient Electrum Server implementation in Rust
-version: 0.10.6
+version: "0.10.6"
 category: indexer
 
 source:

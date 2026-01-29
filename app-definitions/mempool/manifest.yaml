@@ -1,7 +1,7 @@
 name: mempool
 displayName: Mempool Explorer
 description: Bitcoin blockchain explorer and mempool visualizer
-version: 3.0.0
+version: "3.0.0"
 category: explorer
 
 source:
