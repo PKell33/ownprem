@@ -1,7 +1,7 @@
 name: bitcoin-core
 displayName: Bitcoin Core
 description: The reference Bitcoin implementation
-version: "29.0"
+version: "29.2"
 category: bitcoin
 
 source:
