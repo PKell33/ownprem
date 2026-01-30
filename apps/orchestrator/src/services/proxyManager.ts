@@ -1,5 +1,6 @@
 import { getDb } from '../db/index.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 import type { AppManifest, ServiceDefinition } from '@ownprem/shared';
 import { config } from '../config.js';
 import { withRetry, isNetworkError, isRetryableStatus } from '../lib/retry.js';
@@ -57,6 +58,15 @@ interface DeploymentWithManifest {
   server_name: string;
 }
 
+interface CADeploymentRow {
+  id: string;
+  server_id: string;
+  status: string;
+  config: string;
+  host: string | null;
+  is_core: number;
+}
+
 // Port range for TCP service proxying
 const TCP_PORT_RANGE_START = 50000;
 const TCP_PORT_RANGE_END = 50100;
@@ -65,6 +75,7 @@ export class ProxyManager {
   private apiPort: number;
   private domain: string;
   private caddyAdminUrl: string;
+  private lastConfigHash: string | null = null;
 
   constructor(
     apiPort: number = config.port,
@@ -306,7 +317,17 @@ export class ProxyManager {
   async updateAndReload(): Promise<boolean> {
     const routes = await this.getActiveRoutes();
     const serviceRoutes = await this.getActiveServiceRoutes();
-    const caddyConfig = this.generateCaddyJsonConfig(routes, serviceRoutes);
+    const caddyConfig = await this.generateCaddyJsonConfig(routes, serviceRoutes);
+
+    // Compute hash of the config to avoid unnecessary reloads
+    const configJson = JSON.stringify(caddyConfig);
+    const configHash = createHash('sha256').update(configJson).digest('hex');
+
+    // Skip reload if config hasn't changed
+    if (this.lastConfigHash === configHash) {
+      logger.info('Caddy config unchanged, skipping reload');
+      return true;
+    }
 
     try {
       await withRetry(
@@ -348,6 +369,7 @@ export class ProxyManager {
         }
       );
 
+      this.lastConfigHash = configHash;
       logger.info('Caddy config updated via Admin API');
       return true;
     } catch (err) {
@@ -356,9 +378,10 @@ export class ProxyManager {
     }
   }
 
-  private generateCaddyJsonConfig(routes: ProxyRoute[], serviceRoutes: ServiceRoute[]): object {
+  private async generateCaddyJsonConfig(routes: ProxyRoute[], serviceRoutes: ServiceRoute[]): Promise<object> {
     const httpRoutes = serviceRoutes.filter(r => r.routeType === 'http');
     const devUiPort = config.caddy.devUiPort;
+    const tlsConfig = await this.generateTlsConfig();
 
     // Build subroute handlers (routes within the host matcher)
     const subroutes: object[] = [];
@@ -432,6 +455,27 @@ export class ProxyManager {
           upstreams: [{ dial: `localhost:${devUiPort}` }],
         }],
       });
+    } else {
+      // Production: serve static UI files with SPA routing
+      const uiDistPath = config.caddy.uiDistPath || '/opt/ownprem/ui/dist';
+      subroutes.push({
+        handle: [
+          {
+            handler: 'rewrite',
+            uri: '{http.matchers.file.relative}',
+          },
+          {
+            handler: 'file_server',
+            root: uiDistPath,
+          },
+        ],
+        match: [{
+          file: {
+            root: uiDistPath,
+            try_files: ['{http.request.uri.path}', '/index.html'],
+          },
+        }],
+      });
     }
 
     // Wrap subroutes in a host-matched route
@@ -453,21 +497,100 @@ export class ProxyManager {
             },
           },
         },
+        ...tlsConfig,
+      },
+    };
+  }
+
+  /**
+   * Generate TLS configuration for Caddy.
+   * Uses ACME issuer pointing to step-ca when available, falls back to internal CA.
+   */
+  private async generateTlsConfig(): Promise<object> {
+    // Check if step-ca is available by testing the ACME endpoint
+    const stepCaAvailable = await this.isStepCaAvailable();
+
+    if (stepCaAvailable) {
+      const acmeDirectoryUrl = 'https://ca.ownprem.local:8443/acme/acme/directory';
+
+      logger.info({ acmeDirectoryUrl }, 'Using step-ca ACME issuer for TLS');
+
+      return {
         tls: {
           automation: {
             policies: [{
               subjects: [this.domain],
-              issuers: [{ module: 'internal' }],
+              issuers: [{
+                module: 'acme',
+                ca: acmeDirectoryUrl,
+                trusted_roots_pem_files: ['/etc/step-ca/root_ca.crt'],
+              }],
             }],
           },
         },
-        pki: {
-          certificate_authorities: {
-            local: { install_trust: true },
-          },
+      };
+    }
+
+    // Fallback to Caddy's internal CA
+    logger.info('step-ca not available, using Caddy internal CA for TLS');
+    return {
+      tls: {
+        automation: {
+          policies: [{
+            subjects: [this.domain],
+            issuers: [{ module: 'internal' }],
+          }],
+        },
+      },
+      pki: {
+        certificate_authorities: {
+          local: { install_trust: true },
         },
       },
     };
+  }
+
+  /**
+   * Check if step-ca is running and accessible.
+   */
+  private async isStepCaAvailable(): Promise<boolean> {
+    try {
+      // Check if the root CA cert exists (indicates step-ca is installed)
+      const { access } = await import('fs/promises');
+      await access('/etc/step-ca/root_ca.crt');
+
+      // Try to reach the ACME directory endpoint using https module for self-signed cert support
+      const https = await import('https');
+      const result = await new Promise<boolean>((resolve) => {
+        const req = https.request({
+          hostname: '127.0.0.1',
+          port: 8443,
+          path: '/acme/acme/directory',
+          method: 'GET',
+          rejectUnauthorized: false,
+          timeout: 2000,
+        }, (res) => {
+          resolve(res.statusCode === 200);
+        });
+
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => {
+          req.destroy();
+          resolve(false);
+        });
+
+        req.end();
+      });
+
+      if (result) {
+        logger.debug('step-ca ACME endpoint is accessible');
+        return true;
+      }
+    } catch {
+      // step-ca not available
+    }
+
+    return false;
   }
 
   private generateCaddyConfig(routes: ProxyRoute[], serviceRoutes: ServiceRoute[]): string {
