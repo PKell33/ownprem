@@ -37,3 +37,8 @@ coverage/
 *.key
 *.pem
 secrets.json
+
+# Build artifacts / downloads
+*.tar.gz
+caddy-l4-binary
+caddy/

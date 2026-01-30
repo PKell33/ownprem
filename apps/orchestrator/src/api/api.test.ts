@@ -29,6 +29,7 @@ vi.mock('../config.js', () => ({
       apps: '/tmp/test-apps',
       appDefinitions: join(__dirname, '../../../app-definitions'),
       logs: '/tmp/test-logs',
+      backups: '/tmp/test-backups',
       caddyConfig: '/tmp/test-caddy/Caddyfile',
     },
     caddy: {
@@ -52,24 +53,36 @@ vi.mock('../config.js', () => ({
   },
 }));
 
+const mockLogger = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  fatal: vi.fn(),
+  child: () => mockLogger,
+};
+
 vi.mock('../lib/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn() },
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn(), child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
-  apiLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-  wsLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-  dbLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-  deployerLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-  authLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  default: mockLogger,
+  logger: mockLogger,
+  apiLogger: mockLogger,
+  wsLogger: mockLogger,
+  dbLogger: mockLogger,
+  deployerLogger: mockLogger,
+  authLogger: mockLogger,
   createRequestLogger: () => (_req: any, _res: any, next: any) => next(),
 }));
 
 // Import after mocks
 const { createApi } = await import('./index.js');
 const { authService } = await import('../services/authService.js');
+const { csrfService } = await import('../services/csrfService.js');
 
 describe('API Endpoints', () => {
   let app: ReturnType<typeof createApi>;
   let authToken: string;
+  let csrfToken: string;
+  let testUserId: string;
 
   beforeAll(async () => {
     // Create in-memory database
@@ -84,10 +97,11 @@ describe('API Endpoints', () => {
     app = createApi();
 
     // Create test user and get token
-    await authService.createUser('testadmin', 'testpassword', true);
+    testUserId = await authService.createUser('testadmin', 'testpassword', true);
     const user = await authService.validateCredentials('testadmin', 'testpassword');
     const tokens = authService.generateTokens(user!);
     authToken = tokens.accessToken;
+    csrfToken = csrfService.generateToken(testUserId);
   });
 
   afterAll(() => {
@@ -204,6 +218,7 @@ describe('API Endpoints', () => {
       const res = await request(app)
         .post('/api/servers')
         .set('Authorization', `Bearer ${authToken}`)
+        .set('X-CSRF-Token', csrfToken)
         .send({});
 
       expect(res.status).toBe(400);
@@ -214,6 +229,7 @@ describe('API Endpoints', () => {
       const res = await request(app)
         .post('/api/servers')
         .set('Authorization', `Bearer ${authToken}`)
+        .set('X-CSRF-Token', csrfToken)
         .send({ name: 'INVALID_NAME!@#', host: 'localhost' });
 
       expect(res.status).toBe(400);

@@ -23,9 +23,26 @@ export type AuditAction =
   | 'authorization_denied'
   | 'totp_enabled'
   | 'totp_disabled'
-  | 'sessions_cleanup';
+  | 'sessions_cleanup'
+  | 'backup_created'
+  | 'backup_restored'
+  | 'backup_deleted'
+  | 'config_exported'
+  | 'config_imported'
+  | 'state_recovery'
+  | 'mount_created'
+  | 'mount_updated'
+  | 'mount_deleted'
+  | 'server_mount_assigned'
+  | 'server_mount_removed'
+  | 'storage_mounted'
+  | 'storage_unmounted'
+  | 'certificate_issued'
+  | 'certificate_renewed'
+  | 'certificate_revoked'
+  | 'ca_initialized';
 
-export type ResourceType = 'deployment' | 'server' | 'user' | 'auth';
+export type ResourceType = 'deployment' | 'server' | 'user' | 'auth' | 'system' | 'mount' | 'server_mount' | 'certificate';
 
 export interface AuditEntry {
   action: AuditAction;

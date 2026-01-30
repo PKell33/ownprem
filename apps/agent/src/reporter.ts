@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { execSync } from 'child_process';
-import type { ServerMetrics, AppStatus } from '@ownprem/shared';
+import type { ServerMetrics, AppStatus, NetworkInfo, AppMetadata } from '@ownprem/shared';
 
 export class Reporter {
   constructor(
@@ -17,6 +17,57 @@ export class Reporter {
       diskTotal: this.getDiskTotal(),
       loadAverage: this.getLoadAverage(),
     };
+  }
+
+  getNetworkInfo(): NetworkInfo {
+    return {
+      ipAddress: this.getIpAddress(),
+      macAddress: this.getMacAddress(),
+    };
+  }
+
+  private getIpAddress(): string | null {
+    try {
+      // Get the primary IP address (non-loopback, non-docker)
+      const result = execSync(
+        "ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \\K[0-9.]+' | head -1",
+        { encoding: 'utf-8' }
+      ).trim();
+      return result || null;
+    } catch {
+      try {
+        // Fallback: get first non-loopback IPv4 address
+        const result = execSync(
+          "hostname -I 2>/dev/null | awk '{print $1}'",
+          { encoding: 'utf-8' }
+        ).trim();
+        return result || null;
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  private getMacAddress(): string | null {
+    try {
+      // Get the MAC address of the primary interface
+      const result = execSync(
+        "ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'dev \\K\\S+' | head -1 | xargs -I{} cat /sys/class/net/{}/address 2>/dev/null",
+        { encoding: 'utf-8' }
+      ).trim();
+      return result || null;
+    } catch {
+      try {
+        // Fallback: get first non-loopback MAC
+        const result = execSync(
+          "cat /sys/class/net/$(ip route show default | awk '/default/ {print $5}')/address 2>/dev/null",
+          { encoding: 'utf-8' }
+        ).trim();
+        return result || null;
+      } catch {
+        return null;
+      }
+    }
   }
 
   async getAppStatuses(): Promise<AppStatus[]> {
@@ -40,8 +91,23 @@ export class Reporter {
 
   private async getAppStatus(appName: string): Promise<AppStatus> {
     try {
+      // Read metadata to get the correct systemd service name
+      const metadataPath = `${this.appsDir}/${appName}/.ownprem.json`;
+      let serviceName = appName;
+
+      if (existsSync(metadataPath)) {
+        try {
+          const metadata: AppMetadata = JSON.parse(readFileSync(metadataPath, 'utf-8'));
+          if (metadata.serviceName) {
+            serviceName = metadata.serviceName;
+          }
+        } catch {
+          // Ignore metadata parse errors, use appName as fallback
+        }
+      }
+
       // Check systemd service status
-      const result = execSync(`systemctl is-active ${appName} 2>/dev/null || true`, {
+      const result = execSync(`systemctl is-active ${serviceName} 2>/dev/null || true`, {
         encoding: 'utf-8',
       }).trim();
 

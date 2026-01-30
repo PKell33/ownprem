@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, Copy, Check, Terminal, AlertTriangle } from 'lucide-react';
-import { useServers, useDeployments } from '../hooks/useApi';
+import { useServers, useDeployments, useApps, useStartDeployment, useStopDeployment, useRestartDeployment, useUninstallDeployment } from '../hooks/useApi';
 import { useAuthStore } from '../stores/useAuthStore';
 import { api } from '../api/client';
 import ServerCard from '../components/ServerCard';
@@ -9,6 +9,7 @@ import Modal from '../components/Modal';
 export default function Servers() {
   const { data: servers, isLoading, refetch } = useServers();
   const { data: deployments } = useDeployments();
+  const { data: apps } = useApps();
   const { user } = useAuthStore();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [setupModalOpen, setSetupModalOpen] = useState(false);
@@ -17,7 +18,13 @@ export default function Servers() {
   const [setupServerName, setSetupServerName] = useState<string>('');
   const [copied, setCopied] = useState(false);
 
+  const startMutation = useStartDeployment();
+  const stopMutation = useStopDeployment();
+  const restartMutation = useRestartDeployment();
+  const uninstallMutation = useUninstallDeployment();
+
   const canManage = user?.isSystemAdmin ?? false;
+  const canOperate = user?.isSystemAdmin || user?.groups?.some(g => g.role === 'admin' || g.role === 'operator') || false;
 
   const handleAddServer = async (name: string, host: string) => {
     try {
@@ -82,18 +89,24 @@ export default function Servers() {
       {isLoading ? (
         <div className="text-muted">Loading...</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-2 min-[1800px]:grid-cols-3 gap-4">
           {servers?.map((server) => {
             const serverDeployments = deployments?.filter((d) => d.serverId === server.id) || [];
             return (
               <ServerCard
                 key={server.id}
                 server={server}
-                deploymentCount={serverDeployments.length}
+                deployments={serverDeployments}
+                apps={apps}
                 canManage={canManage}
+                canOperate={canOperate}
                 onDelete={() => handleDeleteServer(server.id)}
                 onViewGuide={() => handleViewGuide(server.name)}
                 onRegenerate={() => handleRegenerateToken(server.id, server.name)}
+                onStartApp={(id) => startMutation.mutate(id)}
+                onStopApp={(id) => stopMutation.mutate(id)}
+                onRestartApp={(id) => restartMutation.mutate(id)}
+                onUninstallApp={(id) => uninstallMutation.mutate(id)}
               />
             );
           })}

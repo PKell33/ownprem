@@ -1,0 +1,40 @@
+[Unit]
+Description=Ownprem Privileged Helper
+Documentation=https://github.com/PKell33/ownprem
+Before=ownprem-agent.service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Working directory
+WorkingDirectory=/opt/ownprem/repo
+
+# Environment
+Environment=NODE_ENV=production
+
+# Create runtime directory for socket
+RuntimeDirectory=ownprem
+RuntimeDirectoryMode=0755
+
+# Start command
+ExecStart=/usr/bin/node /opt/ownprem/repo/apps/privileged-helper/dist/index.js
+
+# Restart policy
+Restart=always
+RestartSec=5
+
+# Security hardening - limited since we need to manage system resources
+# The real security boundary is the validator whitelist, not systemd restrictions
+ProtectHome=yes
+PrivateTmp=yes
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ownprem-helper
+
+[Install]
+WantedBy=multi-user.target

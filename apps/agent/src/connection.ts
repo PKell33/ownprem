@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import type { AgentCommand, AgentStatusReport, LogResult, CommandAck } from '@ownprem/shared';
+import type { AgentCommand, AgentStatusReport, LogResult, CommandAck, CommandResult } from '@ownprem/shared';
 import logger from './lib/logger.js';
 
 const RECONNECTION_DELAY_MS = 5000;
@@ -13,6 +13,7 @@ export interface ConnectionOptions {
   onConnect: () => void;
   onDisconnect: () => void;
   onServerShutdown?: () => void;
+  onStatusRequest?: () => void;
 }
 
 export class Connection {
@@ -71,6 +72,14 @@ export class Connection {
         this.options.onServerShutdown();
       }
     });
+
+    // Handle immediate status request from orchestrator
+    this.socket.on('request_status', () => {
+      logger.debug('Received status request from orchestrator');
+      if (this.options.onStatusRequest) {
+        this.options.onStatusRequest();
+      }
+    });
   }
 
   disconnect(): void {
@@ -96,7 +105,7 @@ export class Connection {
     this.socket.emit('command:ack', ack);
   }
 
-  sendCommandResult(result: { commandId: string; status: 'success' | 'error'; message?: string; duration?: number }): void {
+  sendCommandResult(result: CommandResult): void {
     if (!this.socket?.connected) {
       logger.warn('Cannot send command result: not connected');
       return;

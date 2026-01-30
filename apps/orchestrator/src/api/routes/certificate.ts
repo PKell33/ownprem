@@ -5,10 +5,13 @@ import path from 'path';
 
 const router = Router();
 
-// Common Caddy CA certificate paths (in order of preference)
+// CA certificate paths (in order of preference)
+// Priority: step-ca root (shared across Caddy HA) > Caddy internal CA (local fallback)
 const CA_CERT_PATHS = [
-  '/etc/caddy/root-ca.crt',  // Copied by install-caddy.sh for easy access
-  '/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt',
+  '/etc/step-ca/root_ca.crt',           // Step-CA root (preferred for HA)
+  '/etc/caddy/ca-root.crt',             // Copied step-ca root on Caddy servers
+  '/etc/caddy/root-ca.crt',             // Copied by install-caddy.sh for easy access
+  '/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt',  // Caddy internal CA (fallback)
   '/home/caddy/.local/share/caddy/pki/authorities/local/root.crt',
   '/root/.local/share/caddy/pki/authorities/local/root.crt',
 ];

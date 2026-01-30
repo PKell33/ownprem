@@ -13,7 +13,10 @@ import proxyRouter from './routes/proxy.js';
 import auditRouter from './routes/audit.js';
 import agentRouter from './routes/agent.js';
 import certificateRouter from './routes/certificate.js';
+import certificatesRouter from './routes/certificates.js';
 import commandsRouter from './routes/commands.js';
+import mountsRouter from './routes/mounts.js';
+import caddyHARouter from './routes/caddyHA.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { devBypassAuth, AuthenticatedRequest } from './middleware/auth.js';
 import { csrfProtection } from './middleware/csrf.js';
@@ -174,9 +177,12 @@ export function createApi(): express.Application {
   app.use('/api/apps', devBypassAuth, appsRouter); // Read-only, no CSRF needed
   app.use('/api/deployments', devBypassAuth, csrfProtection, deploymentsRouter);
   app.use('/api/services', devBypassAuth, servicesRouter); // Read-only, no CSRF needed
-  app.use('/api/system', devBypassAuth, systemRouter); // Read-only, no CSRF needed
+  app.use('/api/system', devBypassAuth, systemRouter); // Has both read and write ops, CSRF applied per-route
   app.use('/api/audit-logs', devBypassAuth, auditRouter); // Read-only, no CSRF needed
   app.use('/api/commands', devBypassAuth, commandsRouter); // Read-only, no CSRF needed
+  app.use('/api/mounts', devBypassAuth, csrfProtection, mountsRouter);
+  app.use('/api/certificates', devBypassAuth, csrfProtection, certificatesRouter);
+  app.use('/api/caddy-ha', devBypassAuth, caddyHARouter); // Has own CSRF per-route
 
   // Error handling
   app.use('/api/*', notFoundHandler);

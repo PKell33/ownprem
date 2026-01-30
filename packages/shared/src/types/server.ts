@@ -6,6 +6,7 @@ export interface Server {
   agentStatus: 'online' | 'offline' | 'error';
   authToken: string | null;
   metrics?: ServerMetrics;
+  networkInfo?: NetworkInfo;
   lastSeen: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -18,6 +19,11 @@ export interface ServerMetrics {
   diskUsed: number;
   diskTotal: number;
   loadAverage: [number, number, number];
+}
+
+export interface NetworkInfo {
+  ipAddress: string | null;
+  macAddress: string | null;
 }
 
 export type AgentStatus = 'online' | 'offline' | 'error';

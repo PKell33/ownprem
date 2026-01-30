@@ -15,6 +15,9 @@ const router = Router();
 interface AppRegistryRow {
   name: string;
   manifest: string;
+  system: number;
+  mandatory: number;
+  singleton: number;
   loaded_at: string;
 }
 
@@ -66,24 +69,65 @@ function syncAppRegistry(): void {
 
   // Insert or update apps from filesystem
   const insertStmt = db.prepare(`
-    INSERT OR REPLACE INTO app_registry (name, manifest, loaded_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
+    INSERT OR REPLACE INTO app_registry (name, manifest, system, mandatory, singleton, loaded_at)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `);
 
   for (const manifest of manifests) {
-    insertStmt.run(manifest.name, JSON.stringify(manifest));
+    insertStmt.run(
+      manifest.name,
+      JSON.stringify(manifest),
+      manifest.system ? 1 : 0,
+      manifest.mandatory ? 1 : 0,
+      manifest.singleton ? 1 : 0
+    );
   }
 }
 
 // GET /api/apps - List available apps
-router.get('/', requireAuth, (_req, res) => {
+router.get('/', requireAuth, (req, res) => {
   syncAppRegistry();
 
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM app_registry ORDER BY name').all() as AppRegistryRow[];
+
+  // Filter options
+  const includeSystem = req.query.includeSystem === 'true';
+  const systemOnly = req.query.systemOnly === 'true';
+
+  let query = 'SELECT * FROM app_registry';
+  if (systemOnly) {
+    query += ' WHERE system = 1';
+  } else if (!includeSystem) {
+    query += ' WHERE system = 0';
+  }
+  query += ' ORDER BY name';
+
+  const rows = db.prepare(query).all() as AppRegistryRow[];
 
   const apps = rows.map(row => ({
     ...JSON.parse(row.manifest) as AppManifest,
+    system: row.system === 1,
+    mandatory: row.mandatory === 1,
+    singleton: row.singleton === 1,
+    loadedAt: new Date(row.loaded_at),
+  }));
+
+  res.json(apps);
+});
+
+// GET /api/apps/system/mandatory - Get mandatory system apps (for auto-install)
+// NOTE: Must be before /:name route to avoid "system" being treated as a name param
+router.get('/system/mandatory', requireAuth, (_req, res) => {
+  syncAppRegistry();
+
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM app_registry WHERE system = 1 AND mandatory = 1 ORDER BY name').all() as AppRegistryRow[];
+
+  const apps = rows.map(row => ({
+    ...JSON.parse(row.manifest) as AppManifest,
+    system: true,
+    mandatory: true,
+    singleton: row.singleton === 1,
     loadedAt: new Date(row.loaded_at),
   }));
 
@@ -101,7 +145,13 @@ router.get('/:name', requireAuth, validateParams(schemas.appNameParam), (req, re
     throw createError('App not found', 404, 'APP_NOT_FOUND');
   }
 
-  res.json(JSON.parse(row.manifest) as AppManifest);
+  const manifest = JSON.parse(row.manifest) as AppManifest;
+  res.json({
+    ...manifest,
+    system: row.system === 1,
+    mandatory: row.mandatory === 1,
+    singleton: row.singleton === 1,
+  });
 });
 
 // GET /api/apps/:name/versions - Get available versions

@@ -62,6 +62,32 @@ function runMigrations(database: Database.Database): void {
     database.exec('CREATE INDEX IF NOT EXISTS idx_agent_tokens_expires ON agent_tokens(expires_at)');
     console.log('Migration: Added expires_at column to agent_tokens table');
   }
+
+  // Migration 3: Add network_info column to servers table
+  const serversColumns = database.prepare("PRAGMA table_info(servers)").all() as { name: string }[];
+  const hasNetworkInfo = serversColumns.some(col => col.name === 'network_info');
+  if (!hasNetworkInfo) {
+    database.exec('ALTER TABLE servers ADD COLUMN network_info JSON');
+    console.log('Migration: Added network_info column to servers table');
+  }
+
+  // Migration 4: Add system and mandatory columns to app_registry table
+  const appRegistryColumns = database.prepare("PRAGMA table_info(app_registry)").all() as { name: string }[];
+  const hasSystemFlag = appRegistryColumns.some(col => col.name === 'system');
+  if (!hasSystemFlag) {
+    database.exec('ALTER TABLE app_registry ADD COLUMN system BOOLEAN DEFAULT FALSE');
+    console.log('Migration: Added system column to app_registry table');
+  }
+  const hasMandatoryFlag = appRegistryColumns.some(col => col.name === 'mandatory');
+  if (!hasMandatoryFlag) {
+    database.exec('ALTER TABLE app_registry ADD COLUMN mandatory BOOLEAN DEFAULT FALSE');
+    console.log('Migration: Added mandatory column to app_registry table');
+  }
+  const hasSingletonFlag = appRegistryColumns.some(col => col.name === 'singleton');
+  if (!hasSingletonFlag) {
+    database.exec('ALTER TABLE app_registry ADD COLUMN singleton BOOLEAN DEFAULT FALSE');
+    console.log('Migration: Added singleton column to app_registry table');
+  }
 }
 
 export function closeDb(): void {

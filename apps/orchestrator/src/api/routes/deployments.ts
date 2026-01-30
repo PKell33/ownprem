@@ -102,6 +102,35 @@ interface AppRegistryRow {
   manifest: string;
 }
 
+// Helper: Check if app is mandatory (cannot be stopped/uninstalled)
+async function checkNotMandatory(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  const deploymentId = req.params.id;
+  const deployment = await deployer.getDeployment(deploymentId);
+
+  if (!deployment) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Deployment not found' } });
+    return;
+  }
+
+  const db = getDb();
+  const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(deployment.appName) as AppRegistryRow | undefined;
+
+  if (appRow) {
+    const manifest = JSON.parse(appRow.manifest) as AppManifest;
+    if (manifest.mandatory) {
+      res.status(403).json({
+        error: {
+          code: 'MANDATORY_APP',
+          message: `${manifest.displayName || deployment.appName} is a mandatory system app and cannot be stopped or uninstalled`
+        }
+      });
+      return;
+    }
+  }
+
+  next();
+}
+
 // GET /api/deployments - List all deployments (filtered by user's groups)
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -236,7 +265,7 @@ router.post('/:id/start', requireAuth, validateParams(schemas.idParam), canOpera
 });
 
 // POST /api/deployments/:id/stop - Stop the app (admin or operator for the group)
-router.post('/:id/stop', requireAuth, validateParams(schemas.idParam), canOperateDeployment, async (req, res, next) => {
+router.post('/:id/stop', requireAuth, validateParams(schemas.idParam), canOperateDeployment, checkNotMandatory, async (req, res, next) => {
   try {
     const deployment = await deployer.stop(req.params.id);
     res.json(deployment);
@@ -295,7 +324,7 @@ router.get('/:id/logs', requireAuth, validateParams(schemas.idParam), validateQu
 });
 
 // DELETE /api/deployments/:id - Uninstall the app (admin for the group)
-router.delete('/:id', requireAuth, validateParams(schemas.idParam), canManageDeployment, async (req, res, next) => {
+router.delete('/:id', requireAuth, validateParams(schemas.idParam), canManageDeployment, checkNotMandatory, async (req, res, next) => {
   try {
     await deployer.uninstall(req.params.id);
     res.status(204).send();

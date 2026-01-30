@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Server, Package, Settings, Wifi, WifiOff, User, LogOut, ChevronUp, Menu, X, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Server, Package, Settings, Wifi, WifiOff, User, Menu, X, Sun, Moon, HardDrive, Shield, LogOut, UserCircle, ChevronUp } from 'lucide-react';
 import { useStore } from '../stores/useStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useThemeStore } from '../stores/useThemeStore';
@@ -14,6 +14,11 @@ export default function Layout() {
   const location = useLocation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleLogout = async () => {
+    await api.logout();
+    navigate('/login');
+  };
 
   // Close sidebar on route change (mobile)
   useEffect(() => {
@@ -31,11 +36,6 @@ export default function Layout() {
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, []);
-
-  const handleLogout = async () => {
-    await api.logout();
-    navigate('/login');
-  };
 
   return (
     <div className="min-h-screen flex">
@@ -73,7 +73,11 @@ export default function Layout() {
           <NavItem to="/" icon={<LayoutDashboard size={20} />} label="Dashboard" />
           <NavItem to="/servers" icon={<Server size={20} />} label="Servers" />
           <NavItem to="/apps" icon={<Package size={20} />} label="Apps" />
+          <NavItem to="/storage" icon={<HardDrive size={20} />} label="Storage" />
           <NavItem to="/settings" icon={<Settings size={20} />} label="Settings" />
+          {user?.isSystemAdmin && (
+            <NavItem to="/admin" icon={<Shield size={20} />} label="Admin" />
+          )}
         </nav>
 
         {/* Theme toggle */}
@@ -130,13 +134,22 @@ export default function Layout() {
           {showUserMenu && (
             <div className="absolute bottom-full left-0 right-0 rounded-t-lg shadow-lg overflow-hidden
               bg-white border border-gray-200 dark:bg-gray-800 dark:border-gray-700">
-              <button
-                onClick={handleLogout}
+              <NavLink
+                to="/account"
+                onClick={() => setShowUserMenu(false)}
                 className="w-full px-4 py-3 flex items-center gap-3 transition-colors
                   text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
               >
+                <UserCircle size={16} />
+                <span>My Account</span>
+              </NavLink>
+              <button
+                onClick={handleLogout}
+                className="w-full px-4 py-3 flex items-center gap-3 transition-colors border-t border-gray-200 dark:border-gray-700
+                  text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
+              >
                 <LogOut size={16} />
-                <span>Sign out</span>
+                <span>Sign Out</span>
               </button>
             </div>
           )}

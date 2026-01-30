@@ -14,6 +14,13 @@ if [ -f "$SCRIPT_DIR/stop.sh" ]; then
   "$SCRIPT_DIR/stop.sh" || true
 fi
 
+# Remove systemd service if it exists
+if [ -f /etc/systemd/system/ownprem-mock-app.service ]; then
+  rm -f /etc/systemd/system/ownprem-mock-app.service
+  systemctl daemon-reload
+  echo "Systemd service removed"
+fi
+
 # Remove app files
 echo "Removing app files..."
 rm -f "$APP_DIR/server.js"

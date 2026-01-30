@@ -3,7 +3,12 @@ export interface AppManifest {
   displayName: string;
   description: string;
   version: string;
-  category: 'bitcoin' | 'lightning' | 'indexer' | 'explorer' | 'utility';
+  category: 'bitcoin' | 'lightning' | 'indexer' | 'explorer' | 'utility' | 'system';
+
+  // System app flags
+  system?: boolean;      // Part of OwnPrem infrastructure
+  mandatory?: boolean;   // Cannot be uninstalled from core server
+  singleton?: boolean;   // Only one instance allowed per cluster
 
   source: AppSource;
 
@@ -29,6 +34,13 @@ export interface AppManifest {
     minMemory?: string;
     minDisk?: string;
   };
+
+  // System app additional config
+  dependencies?: AppDependency[];
+  dataDirectories?: DataDirectory[];
+  serviceUser?: string;
+  serviceGroup?: string;
+  capabilities?: string[];  // Linux capabilities, e.g., ['cap_net_bind_service=+ep']
 }
 
 export interface AppSource {
@@ -43,18 +55,32 @@ export interface AppSource {
 export interface ServiceDefinition {
   name: string;
   port: number;
-  protocol: 'tcp' | 'http' | 'zmq';
+  protocol: 'tcp' | 'http' | 'zmq' | 'https';
+  description?: string;
+  internal?: boolean;    // Only accessible within OwnPrem infrastructure
   credentials?: {
     type: 'rpc' | 'token' | 'password';
     fields: string[];
   };
 }
 
+export interface AppDependency {
+  name: string;
+  downloadUrl?: string;
+  binaryName?: string;
+}
+
+export interface DataDirectory {
+  path: string;
+  description?: string;
+}
+
 export interface ServiceRequirement {
   service: string;
   optional?: boolean;
   locality: 'same-server' | 'any-server' | 'prefer-same-server';
-  injectAs: {
+  description?: string;
+  injectAs?: {
     host?: string;
     port?: string;
     credentials?: Record<string, string>;

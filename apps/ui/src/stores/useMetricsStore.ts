@@ -5,7 +5,9 @@ interface MetricsDataPoint {
   timestamp: number;
   cpu: number;
   memoryPercent: number;
+  memoryUsed: number;
   diskPercent: number;
+  diskUsed: number;
 }
 
 interface MetricsState {
@@ -35,7 +37,9 @@ export const useMetricsStore = create<MetricsState>((set, get) => ({
       timestamp,
       cpu: metrics.cpuPercent,
       memoryPercent: Math.round(memoryPercent * 10) / 10,
+      memoryUsed: metrics.memoryUsed,
       diskPercent: Math.round(diskPercent * 10) / 10,
+      diskUsed: metrics.diskUsed,
     };
 
     set((state) => {

@@ -352,4 +352,53 @@ export const schemas = {
         .optional(),
     }),
   },
+
+  // Mount schemas
+  mounts: {
+    create: z.object({
+      name: z.string()
+        .min(1, 'Name is required')
+        .max(100)
+        .regex(/^[a-zA-Z0-9_-]+$/, 'Name can only contain letters, numbers, underscores, and hyphens'),
+      mountType: z.enum(['nfs', 'cifs'], { message: 'Mount type must be nfs or cifs' }),
+      source: z.string()
+        .min(1, 'Source is required')
+        .max(255),
+      defaultOptions: z.string().max(500).optional(),
+      description: z.string().max(500).optional(),
+      credentials: z.object({
+        username: z.string().min(1).max(100),
+        password: z.string().min(1).max(256),
+        domain: z.string().max(100).optional(),
+      }).optional(),
+    }),
+
+    update: z.object({
+      name: z.string()
+        .min(1)
+        .max(100)
+        .regex(/^[a-zA-Z0-9_-]+$/, 'Name can only contain letters, numbers, underscores, and hyphens')
+        .optional(),
+      source: z.string().min(1).max(255).optional(),
+      defaultOptions: z.string().max(500).optional().nullable(),
+      description: z.string().max(500).optional().nullable(),
+      credentials: z.object({
+        username: z.string().min(1).max(100),
+        password: z.string().min(1).max(256),
+        domain: z.string().max(100).optional(),
+      }).optional().nullable(),
+    }),
+
+    assignToServer: z.object({
+      serverId: z.string().min(1, 'Server ID is required'),
+      mountId: z.string().regex(uuidPattern, 'Invalid mount ID format'),
+      mountPoint: z.string()
+        .min(1, 'Mount point is required')
+        .max(255)
+        .regex(/^\/[a-zA-Z0-9/_-]+$/, 'Mount point must be an absolute path'),
+      options: z.string().max(500).optional(),
+      purpose: z.string().max(100).optional(),
+      autoMount: z.boolean().optional(),
+    }),
+  },
 };

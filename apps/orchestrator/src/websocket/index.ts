@@ -26,6 +26,25 @@ export function getIo(): SocketServer {
 }
 
 /**
+ * Broadcast deployment status change to all connected UI clients.
+ */
+export function broadcastDeploymentStatus(data: {
+  deploymentId: string;
+  appName: string;
+  serverId: string;
+  status: string;
+  previousStatus?: string;
+  routeActive?: boolean;
+}): void {
+  if (io) {
+    io.emit('deployment:status', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
+/**
  * Gracefully shutdown WebSocket server.
  * Notifies all agents, waits for pending commands, then closes connections.
  */

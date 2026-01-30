@@ -1,16 +1,25 @@
 #!/bin/bash
 # Stop script for Mock App
-# Note: Mock App is a real Node.js server for testing the platform,
-# so it runs in both dev and production modes (no systemd).
+# Note: In production, the agent calls systemctl directly via privileged helper.
+# This script is for manual/dev use only.
 set -e
 
 echo "Stopping Mock App..."
 
-# Get the directory where this script lives
+SERVICE_NAME="ownprem-mock-app"
+
+# Try systemctl (will work if run as root or via privileged helper)
+if systemctl list-unit-files "$SERVICE_NAME.service" &>/dev/null; then
+  systemctl stop "$SERVICE_NAME" 2>/dev/null && {
+    echo "Mock App stopped via systemd"
+    exit 0
+  }
+fi
+
+# Fallback for dev mode - use PID file
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="${APP_DIR:-$SCRIPT_DIR}"
 
-# Find and kill the node process using PID file
 if [ -f "$APP_DIR/mock-app.pid" ]; then
   PID=$(cat "$APP_DIR/mock-app.pid")
   if kill -0 "$PID" 2>/dev/null; then

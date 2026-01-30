@@ -94,4 +94,26 @@ cat > "$APP_DIR/config.json" << EOF
 }
 EOF
 
+# Create systemd service (ownprem- prefix required for privileged helper)
+cat > /etc/systemd/system/ownprem-mock-app.service << EOF
+[Unit]
+Description=OwnPrem Mock App
+After=network.target
+
+[Service]
+Type=simple
+User=ownprem
+Group=ownprem
+WorkingDirectory=$APP_DIR
+Environment=APP_DIR=$APP_DIR
+ExecStart=/usr/bin/node $APP_DIR/server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+
 echo "Mock App ${VERSION} installed successfully"

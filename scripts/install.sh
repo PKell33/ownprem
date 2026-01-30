@@ -7,7 +7,7 @@ set -e
 # Options:
 #   --type TYPE       Install type: orchestrator, agent, or both (default: both)
 #   --domain DOMAIN   Domain name (default: ownprem.local)
-#   --local           Use self-signed certificates (for .local domains)
+#   --local           Use OwnPrem CA / step-ca (for .local domains)
 #   --email EMAIL     Email for Let's Encrypt (required for public domains)
 #   --skip-deps       Skip installing system dependencies
 #   --skip-caddy      Skip Caddy installation
@@ -54,7 +54,7 @@ Usage: sudo ./install.sh [options]
 Options:
   --type TYPE       Install type: orchestrator, agent, or both (default: both)
   --domain DOMAIN   Domain name (default: ownprem.local)
-  --local           Use self-signed certificates (for .local domains)
+  --local           Use OwnPrem CA / step-ca (for .local domains)
   --email EMAIL     Email for Let's Encrypt (required for public domains)
   --skip-deps       Skip installing system dependencies (Node.js, etc.)
   --skip-caddy      Skip Caddy installation
@@ -158,7 +158,7 @@ echo ""
 echo "Configuration:"
 echo "  Install type: $INSTALL_TYPE"
 echo "  Domain: $DOMAIN"
-echo "  TLS: $([ "$IS_LOCAL" == "true" ] && echo "Self-signed (Caddy CA)" || echo "Let's Encrypt")"
+echo "  TLS: $([ "$IS_LOCAL" == "true" ] && echo "OwnPrem CA (step-ca)" || echo "Let's Encrypt")"
 echo "  Skip deps: $SKIP_DEPS"
 echo "  Skip Caddy: $SKIP_CADDY"
 echo "  Skip firewall: $SKIP_FIREWALL"
@@ -275,7 +275,8 @@ fi
 log_step "Installing npm dependencies and building..."
 
 cd "$REPO_DIR"
-sudo -u "$OWNPREM_USER" npm ci --omit=dev 2>/dev/null || sudo -u "$OWNPREM_USER" npm install --omit=dev
+# Install all dependencies (including devDependencies needed for build)
+sudo -u "$OWNPREM_USER" npm ci 2>/dev/null || sudo -u "$OWNPREM_USER" npm install
 sudo -u "$OWNPREM_USER" npm run build
 
 # ============================================
@@ -335,14 +336,20 @@ install_agent() {
     if [[ ! -f "$CONFIG_DIR/agent.env" ]]; then
         cp "$REPO_DIR/scripts/env/agent.env.example" "$CONFIG_DIR/agent.env"
 
-        # Set default SERVER_ID to hostname
-        HOSTNAME=$(hostname -s)
-        sed -i "s/^SERVER_ID=.*/SERVER_ID=$HOSTNAME/" "$CONFIG_DIR/agent.env"
+        # Set SERVER_ID: use 'core' for the core server, hostname for remote agents
+        if [[ "$INSTALL_TYPE" == "both" || "$INSTALL_TYPE" == "orchestrator" ]]; then
+            # This is the core server - use 'core' as the server ID
+            sed -i "s/^SERVER_ID=.*/SERVER_ID=core/" "$CONFIG_DIR/agent.env"
+            log_info "Created $CONFIG_DIR/agent.env with SERVER_ID=core (core server)"
+        else
+            # Remote agent - use hostname
+            HOSTNAME=$(hostname -s)
+            sed -i "s/^SERVER_ID=.*/SERVER_ID=$HOSTNAME/" "$CONFIG_DIR/agent.env"
+            log_info "Created $CONFIG_DIR/agent.env with SERVER_ID=$HOSTNAME"
+        fi
 
         chmod 600 "$CONFIG_DIR/agent.env"
         chown "$OWNPREM_USER:$OWNPREM_GROUP" "$CONFIG_DIR/agent.env"
-
-        log_info "Created $CONFIG_DIR/agent.env with SERVER_ID=$HOSTNAME"
     else
         log_info "Environment file exists: $CONFIG_DIR/agent.env"
     fi
@@ -385,19 +392,84 @@ if [[ "$SKIP_CADDY" != "true" && ("$INSTALL_TYPE" == "orchestrator" || "$INSTALL
         apt-get install -y caddy
     fi
 
-    # Configure Caddy
-    CADDY_ARGS="--domain $DOMAIN"
+    # Configure Caddy (install-caddy.sh expects: <domain> [email])
+    # For local domains, no email is needed (uses internal CA)
     if [[ "$IS_LOCAL" == "true" ]]; then
-        CADDY_ARGS="$CADDY_ARGS --local"
+        bash "$REPO_DIR/scripts/caddy/install-caddy.sh" "$DOMAIN"
     else
-        CADDY_ARGS="$CADDY_ARGS --email $EMAIL"
+        bash "$REPO_DIR/scripts/caddy/install-caddy.sh" "$DOMAIN" "$EMAIL"
     fi
-
-    bash "$REPO_DIR/scripts/caddy/install-caddy.sh" $CADDY_ARGS
 fi
 
 # ============================================
-# Step 9: Configure Firewall
+# Step 9: Install Mandatory System Apps
+# ============================================
+# These apps require root to install (systemd services, system users, etc.)
+# so they must be installed here, not by the agent
+if [[ "$INSTALL_TYPE" == "orchestrator" || "$INSTALL_TYPE" == "both" ]]; then
+    log_step "Installing mandatory system apps..."
+
+    # Install OwnPrem CA (step-ca)
+    CA_INSTALL_SCRIPT="$REPO_DIR/app-definitions/ownprem-ca/install.sh"
+    if [[ -f "$CA_INSTALL_SCRIPT" ]]; then
+        log_info "Installing OwnPrem CA (step-ca)..."
+
+        # Set environment variables for the install script
+        export APP_DIR="$APPS_DIR/ownprem-ca"
+        export CA_NAME="OwnPrem Root CA"
+        export CA_DNS="ca.ownprem.local"
+        export ACME_ENABLED="true"
+        export DEFAULT_CERT_DURATION="720h"
+        export MAX_CERT_DURATION="8760h"
+        export ROOT_CERT_DURATION="10"
+
+        # Create app directory
+        mkdir -p "$APP_DIR"
+
+        # Copy scripts to app directory
+        cp "$REPO_DIR/app-definitions/ownprem-ca/"*.sh "$APP_DIR/" 2>/dev/null || true
+        chmod +x "$APP_DIR/"*.sh 2>/dev/null || true
+
+        # Write metadata file
+        cat > "$APP_DIR/.ownprem.json" << EOF
+{
+  "name": "ownprem-ca",
+  "displayName": "Smallstep CA",
+  "version": "0.27.5",
+  "serviceName": "ownprem-ca"
+}
+EOF
+
+        # Run install script
+        bash "$CA_INSTALL_SCRIPT"
+
+        # Start the CA service
+        systemctl start ownprem-ca
+        sleep 2
+
+        if systemctl is-active --quiet ownprem-ca; then
+            log_info "OwnPrem CA installed and started successfully"
+        else
+            log_warn "OwnPrem CA installed but may not have started correctly"
+            journalctl -u ownprem-ca --no-pager -n 5
+        fi
+
+        # Add hosts entries for local DNS (needed for ACME and UI access)
+        if ! grep -q "ca.ownprem.local" /etc/hosts; then
+            log_info "Adding ca.ownprem.local to /etc/hosts..."
+            echo "127.0.0.1 ca.ownprem.local" >> /etc/hosts
+        fi
+        if ! grep -q " ${DOMAIN}$\| ${DOMAIN} " /etc/hosts && [[ "$DOMAIN" == *".local" ]]; then
+            log_info "Adding ${DOMAIN} to /etc/hosts..."
+            echo "127.0.0.1 ${DOMAIN}" >> /etc/hosts
+        fi
+    else
+        log_warn "CA install script not found: $CA_INSTALL_SCRIPT"
+    fi
+fi
+
+# ============================================
+# Step 10: Configure Firewall
 # ============================================
 if [[ "$SKIP_FIREWALL" != "true" ]]; then
     log_step "Configuring firewall..."
@@ -406,19 +478,20 @@ if [[ "$SKIP_FIREWALL" != "true" ]]; then
         ufw allow 22/tcp comment 'SSH'
         ufw allow 80/tcp comment 'HTTP'
         ufw allow 443/tcp comment 'HTTPS'
+        ufw allow 8443/tcp comment 'OwnPrem CA (ACME)'
 
         if [[ $(ufw status | grep -c "Status: active") -eq 0 ]]; then
             log_warn "UFW is not enabled. Enable with: sudo ufw enable"
         fi
 
-        log_info "Firewall rules added (SSH, HTTP, HTTPS)"
+        log_info "Firewall rules added (SSH, HTTP, HTTPS, CA)"
     else
         log_warn "UFW not installed, skipping firewall configuration"
     fi
 fi
 
 # ============================================
-# Step 10: Start Services
+# Step 11: Start Services
 # ============================================
 log_step "Starting services..."
 
@@ -455,6 +528,7 @@ echo ""
 echo "Services:"
 if [[ "$INSTALL_TYPE" == "orchestrator" || "$INSTALL_TYPE" == "both" ]]; then
     echo "  Orchestrator: $(systemctl is-active ownprem-orchestrator)"
+    echo "  CA (step-ca): $(systemctl is-active ownprem-ca 2>/dev/null || echo 'not installed')"
 fi
 if [[ "$INSTALL_TYPE" == "agent" || "$INSTALL_TYPE" == "both" ]]; then
     echo "  Agent: $(systemctl is-active ownprem-agent)"
@@ -491,7 +565,7 @@ echo "  Agent: $CONFIG_DIR/agent.env"
 echo "  Caddy: /etc/caddy/Caddyfile"
 echo ""
 echo "Useful commands:"
-echo "  systemctl status ownprem-orchestrator ownprem-agent"
-echo "  journalctl -u ownprem-orchestrator -u ownprem-agent -f"
+echo "  systemctl status ownprem-orchestrator ownprem-agent ownprem-ca"
+echo "  journalctl -u ownprem-orchestrator -u ownprem-agent -u ownprem-ca -f"
 echo "  sudo caddy reload --config /etc/caddy/Caddyfile"
 echo ""

@@ -50,6 +50,7 @@ export const config = {
     apps: process.env.APPS_PATH || join(__dirname, '../../../data/apps'),
     appDefinitions: process.env.APP_DEFINITIONS_PATH || join(__dirname, '../../../app-definitions'),
     logs: process.env.LOGS_PATH || join(__dirname, '../../../logs'),
+    backups: process.env.BACKUP_PATH || join(__dirname, '../../../data/backups'),
     caddyConfig: process.env.CADDY_CONFIG_PATH || '/etc/caddy/Caddyfile',
   },
 
@@ -57,6 +58,9 @@ export const config = {
     domain: process.env.CADDY_DOMAIN || 'ownprem.local',
     adminUrl: process.env.CADDY_ADMIN_URL || 'http://localhost:2019',
     devUiPort: parseInt(process.env.DEV_UI_PORT || '5173', 10),
+    uiDistPath: process.env.UI_DIST_PATH || (isDevelopment
+      ? join(__dirname, '../../../apps/ui/dist')
+      : '/opt/ownprem/repo/apps/ui/dist'),
   },
 
   secrets: {

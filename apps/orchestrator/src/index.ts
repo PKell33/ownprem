@@ -5,7 +5,11 @@ import { createApi, initializeApi } from './api/index.js';
 import { createWebSocket, shutdownWebSocket } from './websocket/index.js';
 import { secretsManager } from './services/secretsManager.js';
 import { proxyManager } from './services/proxyManager.js';
+import { systemAppsService } from './services/systemAppsService.js';
 import { startSessionCleanup, stopSessionCleanup } from './jobs/sessionCleanup.js';
+import { startMountStatusChecker, stopMountStatusChecker } from './jobs/mountStatusChecker.js';
+import { startCertRenewal, stopCertRenewal } from './jobs/certRenewal.js';
+import { runStartupRecovery } from './jobs/stateRecovery.js';
 import logger from './lib/logger.js';
 
 // Track shutdown state for graceful shutdown
@@ -22,11 +26,14 @@ export function isServerShuttingDown(): boolean {
 async function main(): Promise<void> {
   logger.info({ env: config.nodeEnv }, 'Starting Ownprem Orchestrator');
 
+  // Initialize database (must be first - other services depend on it)
+  initDb();
+
   // Validate secrets configuration (will throw in production without SECRETS_KEY)
   secretsManager.validateConfiguration();
 
-  // Initialize database
-  initDb();
+  // Run state recovery for deployments stuck in transient states
+  await runStartupRecovery();
 
   // Initialize API services (creates default user in dev mode)
   await initializeApi();
@@ -42,6 +49,11 @@ async function main(): Promise<void> {
 
   // Start background jobs
   startSessionCleanup();
+  startMountStatusChecker();
+  startCertRenewal();
+
+  // Start system apps monitor (installs mandatory apps when core agent connects)
+  systemAppsService.start();
 
   // Start listening on all interfaces for remote access
   httpServer.listen(config.port, '0.0.0.0', async () => {
@@ -76,6 +88,9 @@ async function main(): Promise<void> {
     try {
       // 1. Stop background jobs
       stopSessionCleanup();
+      stopMountStatusChecker();
+      stopCertRenewal();
+      systemAppsService.stop();
       logger.info('Background jobs stopped');
 
       // 2. Shutdown WebSocket (notifies agents, waits for pending commands)

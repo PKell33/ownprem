@@ -19,7 +19,7 @@ webui:
 
 logging:
   logFile: "${appDir}/logs/mock-app.log"
-  serviceName: mock-app
+  serviceName: ownprem-mock-app
 
 configSchema:
   - name: message

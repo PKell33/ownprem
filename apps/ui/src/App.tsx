@@ -4,7 +4,10 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Servers from './pages/Servers';
 import Apps from './pages/Apps';
+import Storage from './pages/Storage';
 import Settings from './pages/Settings';
+import Admin from './pages/Admin';
+import MyAccount from './pages/MyAccount';
 import { Login } from './pages/Login';
 import { TotpSetup } from './pages/TotpSetup';
 import { CertificateSetup } from './pages/CertificateSetup';
@@ -56,7 +59,10 @@ function App() {
         <Route index element={<Dashboard />} />
         <Route path="servers" element={<Servers />} />
         <Route path="apps" element={<Apps />} />
+        <Route path="storage" element={<Storage />} />
+        <Route path="account" element={<MyAccount />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="admin" element={<Admin />} />
       </Route>
     </Routes>
   );

@@ -1,34 +1,41 @@
 import { useState } from 'react';
-import { ExternalLink, Play, Square, RotateCw, Trash2, Download, Github, GitBranch, Users, Link, Ban, FileText, Settings } from 'lucide-react';
-import type { AppManifest, Deployment } from '../api/client';
+import { ExternalLink, Play, Square, RotateCw, Trash2, Download, Github, GitBranch, Link, Ban, FileText, Settings, Plus, Server, Shield } from 'lucide-react';
+import type { AppManifest, Deployment, Server as ServerType } from '../api/client';
 import StatusBadge from './StatusBadge';
 import AppIcon from './AppIcon';
 import Modal from './Modal';
 import ConnectionInfoModal from './ConnectionInfoModal';
 import LogViewerModal from './LogViewerModal';
 import EditConfigModal from './EditConfigModal';
+import CaddyRoutesPanel from './CaddyRoutesPanel';
 
 interface AppDetailModalProps {
   app: AppManifest;
-  deployment?: Deployment;
-  groupName?: string;
+  deployments?: Deployment[];
+  servers?: ServerType[];
   conflictsWith?: string | null;
   isOpen: boolean;
   onClose: () => void;
   onInstall?: () => void;
-  onStart?: () => void;
-  onStop?: () => void;
-  onRestart?: () => void;
-  onUninstall?: () => void;
+  onStart?: (deploymentId: string) => void;
+  onStop?: (deploymentId: string) => void;
+  onRestart?: (deploymentId: string) => void;
+  onUninstall?: (deploymentId: string) => void;
   onConfigSaved?: () => void;
   canManage?: boolean;
   canOperate?: boolean;
 }
 
+type ConfirmAction = {
+  type: 'stop' | 'restart' | 'uninstall';
+  deploymentId: string;
+  serverName: string;
+};
+
 export default function AppDetailModal({
   app,
-  deployment,
-  groupName,
+  deployments = [],
+  servers = [],
   conflictsWith,
   isOpen,
   onClose,
@@ -41,16 +48,74 @@ export default function AppDetailModal({
   canManage = true,
   canOperate = true,
 }: AppDetailModalProps) {
-  const [showConnectionInfo, setShowConnectionInfo] = useState(false);
-  const [showLogs, setShowLogs] = useState(false);
-  const [showEditConfig, setShowEditConfig] = useState(false);
+  const [connectionInfoDeploymentId, setConnectionInfoDeploymentId] = useState<string | null>(null);
+  const [logsDeployment, setLogsDeployment] = useState<{ id: string; serverName: string } | null>(null);
+  const [editConfigDeployment, setEditConfigDeployment] = useState<Deployment | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
 
-  const isInstalled = !!deployment;
-  const isRunning = deployment?.status === 'running';
-  const canControl = isInstalled && !['installing', 'configuring', 'uninstalling'].includes(deployment?.status || '');
+  const isInstalled = deployments.length > 0;
   const hasServices = app.provides && app.provides.length > 0;
   const isBlocked = !isInstalled && !!conflictsWith;
   const hasEditableConfig = app.configSchema?.some(f => !f.generated && !f.inheritFrom) ?? false;
+  const isCaddy = app.name === 'ownprem-caddy';
+
+  // Get server name by ID
+  const getServerName = (serverId: string) => {
+    const server = servers.find(s => s.id === serverId);
+    return server?.name || serverId;
+  };
+
+  // Check if app can be installed on more servers
+  const installedServerIds = deployments.map(d => d.serverId);
+  const availableServers = servers.filter(s =>
+    s.agentStatus === 'online' && !installedServerIds.includes(s.id)
+  );
+  const canInstallMore = canManage && availableServers.length > 0 && !conflictsWith;
+
+  const handleConfirmAction = () => {
+    if (!confirmAction) return;
+
+    switch (confirmAction.type) {
+      case 'stop':
+        onStop?.(confirmAction.deploymentId);
+        break;
+      case 'restart':
+        onRestart?.(confirmAction.deploymentId);
+        break;
+      case 'uninstall':
+        onUninstall?.(confirmAction.deploymentId);
+        break;
+    }
+    setConfirmAction(null);
+  };
+
+  const getConfirmModalContent = () => {
+    if (!confirmAction) return { title: '', message: '', buttonText: '', buttonClass: '' };
+
+    switch (confirmAction.type) {
+      case 'stop':
+        return {
+          title: `Stop ${app.displayName} on ${confirmAction.serverName}?`,
+          message: 'The app will be stopped and any active connections will be terminated.',
+          buttonText: 'Stop',
+          buttonClass: 'bg-yellow-600 hover:bg-yellow-700',
+        };
+      case 'restart':
+        return {
+          title: `Restart ${app.displayName} on ${confirmAction.serverName}?`,
+          message: 'The app will be restarted. This may briefly interrupt service.',
+          buttonText: 'Restart',
+          buttonClass: 'bg-blue-600 hover:bg-blue-700',
+        };
+      case 'uninstall':
+        return {
+          title: `Uninstall ${app.displayName} from ${confirmAction.serverName}?`,
+          message: 'This will remove the app and all its data from this server. This action cannot be undone.',
+          buttonText: 'Uninstall',
+          buttonClass: 'bg-red-600 hover:bg-red-700',
+        };
+    }
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="" size="lg">
@@ -61,119 +126,182 @@ export default function AppDetailModal({
             <AppIcon appName={app.name} size={80} />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold">{app.displayName}</h2>
-                <p className="text-muted">v{app.version}</p>
-              </div>
-              {isInstalled && (
-                <StatusBadge status={deployment.status} />
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-2xl font-bold">{app.displayName}</h2>
+              {app.system && (
+                <span className="flex items-center gap-1 text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">
+                  <Shield size={12} />
+                  System
+                </span>
+              )}
+              {app.mandatory && (
+                <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-1 rounded">
+                  Auto-installed
+                </span>
               )}
             </div>
+            <p className="text-muted">v{app.version}</p>
             <p className="text-muted mt-2">{app.description}</p>
-            {groupName && (
-              <div className="flex items-center gap-1 mt-2 text-sm text-gray-500">
-                <Users size={14} />
-                <span>{groupName}</span>
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap gap-2">
-          {!isInstalled ? (
-            isBlocked ? (
-              <div className="flex items-center gap-2 px-4 py-2 bg-amber-900/30 border border-amber-700 text-amber-400 rounded-lg">
-                <Ban size={18} />
-                <span>Conflicts with {conflictsWith}</span>
-              </div>
-            ) : canManage && (
+        {/* Conflict Warning */}
+        {isBlocked && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-amber-900/30 border border-amber-700 text-amber-400 rounded-lg">
+            <Ban size={18} />
+            <span>Cannot install - conflicts with {conflictsWith}</span>
+          </div>
+        )}
+
+        {/* Deployments Section */}
+        <div className="pt-4 border-t border-[var(--border-color)]">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-[var(--text-secondary)]">
+              {isInstalled ? `Installed on ${deployments.length} server${deployments.length !== 1 ? 's' : ''}` : 'Not installed'}
+            </h3>
+            {canInstallMore && (
               <button
                 onClick={onInstall}
-                title="Install"
-                className="p-2.5 bg-accent hover:bg-accent/90 text-slate-900 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent hover:bg-accent/90 text-slate-900 transition-colors"
               >
-                <Download size={20} />
+                <Plus size={14} />
+                Install on Server
               </button>
-            )
-          ) : (
-            <>
-              {canControl && canOperate && !isRunning && (
-                <button
-                  onClick={onStart}
-                  title="Start"
-                  className="p-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
-                >
-                  <Play size={20} />
-                </button>
-              )}
-              {canControl && canOperate && isRunning && (
-                <button
-                  onClick={onStop}
-                  title="Stop"
-                  className="p-2.5 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors"
-                >
-                  <Square size={20} />
-                </button>
-              )}
-              {canControl && canOperate && isRunning && (
-                <button
-                  onClick={onRestart}
-                  title="Restart"
-                  className="p-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                >
-                  <RotateCw size={20} />
-                </button>
-              )}
-              {app.webui?.enabled && isRunning && (
-                <a
-                  href={app.webui.basePath}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open Web UI"
-                  className="p-2.5 rounded-lg transition-colors bg-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)]"
-                >
-                  <ExternalLink size={20} />
-                </a>
-              )}
-              {isInstalled && hasServices && canManage && (
-                <button
-                  onClick={() => setShowConnectionInfo(true)}
-                  title="Connection Info"
-                  className="p-2.5 rounded-lg transition-colors bg-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)]"
-                >
-                  <Link size={20} />
-                </button>
-              )}
-              {isInstalled && hasEditableConfig && canManage && (
-                <button
-                  onClick={() => setShowEditConfig(true)}
-                  title="Settings"
-                  className="p-2.5 rounded-lg transition-colors bg-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)]"
-                >
-                  <Settings size={20} />
-                </button>
-              )}
-              {isInstalled && canOperate && (
-                <button
-                  onClick={() => setShowLogs(true)}
-                  title="View Logs"
-                  className="p-2.5 rounded-lg transition-colors bg-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] text-[var(--text-primary)]"
-                >
-                  <FileText size={20} />
-                </button>
-              )}
-              {canControl && canManage && (
-                <button
-                  onClick={onUninstall}
-                  title="Uninstall"
-                  className="p-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-500 rounded-lg transition-colors ml-auto"
-                >
-                  <Trash2 size={20} />
-                </button>
-              )}
-            </>
+            )}
+            {!isInstalled && !isBlocked && canManage && (
+              <button
+                onClick={onInstall}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-accent hover:bg-accent/90 text-slate-900 transition-colors"
+              >
+                <Download size={14} />
+                Install
+              </button>
+            )}
+          </div>
+
+          {isInstalled && (
+            <div className="space-y-2">
+              {deployments.map((deployment) => {
+                const serverName = getServerName(deployment.serverId);
+                const isRunning = deployment.status === 'running';
+                const canControl = !['installing', 'configuring', 'uninstalling'].includes(deployment.status);
+
+                return (
+                  <div
+                    key={deployment.id}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-[var(--bg-secondary)]"
+                  >
+                    {/* Server info */}
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Server size={16} className="text-muted flex-shrink-0" />
+                      <span className="font-medium truncate">{serverName}</span>
+                      <StatusBadge status={deployment.status} size="sm" />
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {/* Start */}
+                      {canControl && canOperate && !isRunning && (
+                        <button
+                          onClick={() => onStart?.(deployment.id)}
+                          title="Start"
+                          className="p-1.5 rounded hover:bg-green-600/20 text-green-500 transition-colors"
+                        >
+                          <Play size={16} />
+                        </button>
+                      )}
+
+                      {/* Stop - disabled for mandatory system apps */}
+                      {canControl && canOperate && isRunning && !app.mandatory && (
+                        <button
+                          onClick={() => setConfirmAction({ type: 'stop', deploymentId: deployment.id, serverName })}
+                          title="Stop"
+                          className="p-1.5 rounded hover:bg-yellow-600/20 text-yellow-500 transition-colors"
+                        >
+                          <Square size={16} />
+                        </button>
+                      )}
+
+                      {/* Restart */}
+                      {canControl && canOperate && isRunning && (
+                        <button
+                          onClick={() => setConfirmAction({ type: 'restart', deploymentId: deployment.id, serverName })}
+                          title="Restart"
+                          className="p-1.5 rounded hover:bg-blue-600/20 text-blue-500 transition-colors"
+                        >
+                          <RotateCw size={16} />
+                        </button>
+                      )}
+
+                      {/* Web UI */}
+                      {app.webui?.enabled && isRunning && (
+                        <a
+                          href={app.webui.basePath}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Open Web UI"
+                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
+                        >
+                          <ExternalLink size={16} />
+                        </a>
+                      )}
+
+                      {/* Connection Info */}
+                      {hasServices && canManage && (
+                        <button
+                          onClick={() => setConnectionInfoDeploymentId(deployment.id)}
+                          title="Connection Info"
+                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
+                        >
+                          <Link size={16} />
+                        </button>
+                      )}
+
+                      {/* Settings */}
+                      {hasEditableConfig && canManage && (
+                        <button
+                          onClick={() => setEditConfigDeployment(deployment)}
+                          title="Settings"
+                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
+                        >
+                          <Settings size={16} />
+                        </button>
+                      )}
+
+                      {/* Logs */}
+                      {canOperate && (
+                        <button
+                          onClick={() => setLogsDeployment({ id: deployment.id, serverName })}
+                          title="View Logs"
+                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
+                        >
+                          <FileText size={16} />
+                        </button>
+                      )}
+
+                      {/* Uninstall - disabled for mandatory system apps */}
+                      {canControl && canManage && !app.mandatory && (
+                        <button
+                          onClick={() => setConfirmAction({ type: 'uninstall', deploymentId: deployment.id, serverName })}
+                          title="Uninstall"
+                          className="p-1.5 rounded hover:bg-red-600/20 text-red-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                      {app.mandatory && (
+                        <span
+                          title="Cannot uninstall mandatory system app"
+                          className="p-1.5 text-gray-600 cursor-not-allowed"
+                        >
+                          <Trash2 size={16} />
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 
@@ -267,34 +395,67 @@ export default function AppDetailModal({
             </div>
           )}
         </div>
+
+        {/* App-specific panels */}
+        <CaddyRoutesPanel isVisible={isCaddy && isInstalled} />
       </div>
 
+      {/* Confirm Action Modal */}
+      {confirmAction && (
+        <Modal
+          isOpen={!!confirmAction}
+          onClose={() => setConfirmAction(null)}
+          title={getConfirmModalContent().title}
+          size="sm"
+        >
+          <div className="space-y-4">
+            <p className="text-[var(--text-secondary)]">
+              {getConfirmModalContent().message}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="flex-1 px-4 py-2 bg-[var(--bg-tertiary)] hover:bg-[var(--bg-secondary)] rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmAction}
+                className={`flex-1 px-4 py-2 text-white rounded transition-colors ${getConfirmModalContent().buttonClass}`}
+              >
+                {getConfirmModalContent().buttonText}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Connection Info Modal */}
-      {deployment && (
+      {connectionInfoDeploymentId && (
         <ConnectionInfoModal
-          deploymentId={deployment.id}
-          isOpen={showConnectionInfo}
-          onClose={() => setShowConnectionInfo(false)}
+          deploymentId={connectionInfoDeploymentId}
+          isOpen={!!connectionInfoDeploymentId}
+          onClose={() => setConnectionInfoDeploymentId(null)}
         />
       )}
 
       {/* Log Viewer Modal */}
-      {deployment && (
+      {logsDeployment && (
         <LogViewerModal
-          deploymentId={deployment.id}
-          appName={app.displayName}
-          isOpen={showLogs}
-          onClose={() => setShowLogs(false)}
+          deploymentId={logsDeployment.id}
+          appName={`${app.displayName} (${logsDeployment.serverName})`}
+          isOpen={!!logsDeployment}
+          onClose={() => setLogsDeployment(null)}
         />
       )}
 
       {/* Edit Config Modal */}
-      {deployment && (
+      {editConfigDeployment && (
         <EditConfigModal
-          deployment={deployment}
+          deployment={editConfigDeployment}
           app={app}
-          isOpen={showEditConfig}
-          onClose={() => setShowEditConfig(false)}
+          isOpen={!!editConfigDeployment}
+          onClose={() => setEditConfigDeployment(null)}
           onSaved={onConfigSaved}
         />
       )}

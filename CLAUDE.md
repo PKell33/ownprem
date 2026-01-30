@@ -244,6 +244,44 @@ configSchema:
     options: [mainnet, testnet, regtest]
 ```
 
+## Privileged Helper
+
+The agent runs as the `ownprem` user (non-root). Operations requiring elevated privileges are handled by a separate **privileged helper** service that runs as root and communicates via Unix socket.
+
+### Service Naming Convention
+
+**IMPORTANT:** All systemd service names MUST start with `ownprem-` prefix (e.g., `ownprem-mock-app`, `ownprem-caddy`).
+
+The privileged helper only allows controlling services matching these patterns:
+- `ownprem-*` (e.g., `ownprem-caddy`, `ownprem-ca`, `ownprem-mock-app`)
+- `step-ca`, `caddy`, `keepalived` (legacy exceptions)
+
+When creating a new app:
+1. Set `logging.serviceName` in manifest.yaml to `ownprem-{appname}`
+2. Name the systemd service file `ownprem-{appname}.service`
+3. The agent will use the privileged helper to start/stop the service
+
+### Privileged Helper Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `systemctl` | Start/stop/restart services (must match allowed patterns) |
+| `create_service_user` | Create system users for services |
+| `create_directory` | Create directories with ownership |
+| `write_file` | Write to allowed paths (systemd units, config files) |
+| `set_capability` | Set Linux capabilities on binaries |
+| `mount`/`umount` | Mount/unmount NFS/CIFS storage |
+| `apt_install` | Install whitelisted packages |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `apps/privileged-helper/src/validator.ts` | Whitelist rules for allowed operations |
+| `apps/privileged-helper/src/executor.ts` | Executes validated operations |
+| `apps/agent/src/privilegedClient.ts` | Agent's client for the helper |
+| `/run/ownprem/helper.sock` | Unix socket (ownprem user only) |
+
 ## Database Schema
 
 SQLite at `./data/ownprem.sqlite` (dev) or `/var/lib/ownprem/db.sqlite` (prod)

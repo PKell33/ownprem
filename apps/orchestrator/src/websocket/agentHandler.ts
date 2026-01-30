@@ -4,7 +4,14 @@ import { getDb, runInTransaction } from '../db/index.js';
 import { wsLogger } from '../lib/logger.js';
 import { mutexManager } from '../lib/mutexManager.js';
 import { authService } from '../services/authService.js';
-import type { AgentStatusReport, CommandResult, CommandAck, ServerMetrics, LogResult } from '@ownprem/shared';
+import { proxyManager } from '../services/proxyManager.js';
+import { broadcastDeploymentStatus } from './index.js';
+import type { AgentStatusReport, CommandResult, CommandAck, ServerMetrics, LogResult, MountCheckResult } from '@ownprem/shared';
+
+// Type guard for MountCheckResult
+function isMountCheckResult(data: unknown): data is MountCheckResult {
+  return typeof data === 'object' && data !== null && 'mounted' in data;
+}
 
 interface AgentAuth {
   serverId?: string;
@@ -62,6 +69,11 @@ const COMPLETION_TIMEOUTS: Record<string, number> = {
   stop: 30 * 1000,             // 30 seconds
   restart: 60 * 1000,          // 1 minute
   uninstall: 2 * 60 * 1000,    // 2 minutes
+  mountStorage: 60 * 1000,        // 1 minute
+  unmountStorage: 30 * 1000,      // 30 seconds
+  checkMount: 10 * 1000,          // 10 seconds
+  configureKeepalived: 2 * 60 * 1000, // 2 minutes (may need to install package)
+  checkKeepalived: 10 * 1000,     // 10 seconds
 };
 
 // Heartbeat configuration
@@ -202,6 +214,16 @@ export function setupAgentHandler(io: SocketServer): void {
 
       // Emit to clients that server is connected
       io.emit('server:connected', { serverId, timestamp: new Date() });
+
+      // Request immediate status report to sync deployment statuses
+      // This ensures the database is updated right away, not after the agent's interval
+      socket.emit('request_status');
+      wsLogger.debug({ serverId }, 'Requested immediate status report from agent');
+
+      // Check for mounts that should be auto-mounted
+      autoMountServerStorage(serverId).catch(err => {
+        wsLogger.error({ serverId, err }, 'Error auto-mounting storage');
+      });
     });
 
     // Handle pong (heartbeat response)
@@ -334,29 +356,82 @@ function cleanupStaleConnections(): void {
 async function handleStatusReport(io: SocketServer, serverId: string, report: AgentStatusReport): Promise<void> {
   const db = getDb();
 
-  // Update server metrics (no mutex needed - single server update)
+  // Update server metrics and network info (no mutex needed - single server update)
   db.prepare(`
-    UPDATE servers SET metrics = ?, last_seen = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    UPDATE servers SET metrics = ?, network_info = ?, last_seen = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(JSON.stringify(report.metrics), serverId);
+  `).run(
+    JSON.stringify(report.metrics),
+    report.networkInfo ? JSON.stringify(report.networkInfo) : null,
+    serverId
+  );
+
+  // Track if any routes changed so we can reload Caddy once at the end
+  let routesChanged = false;
 
   // Update deployment statuses - use per-deployment mutex to avoid race with command results
   // Status report only updates deployments in stable states (not installing/configuring/uninstalling)
   for (const app of report.apps) {
-    // Get deployment ID for this app on this server
+    // Get deployment info for this app on this server
     const deployment = db.prepare(`
-      SELECT id FROM deployments WHERE server_id = ? AND app_name = ?
-    `).get(serverId, app.name) as { id: string } | undefined;
+      SELECT d.id, d.status, pr.active as route_active
+      FROM deployments d
+      LEFT JOIN proxy_routes pr ON pr.deployment_id = d.id
+      WHERE d.server_id = ? AND d.app_name = ?
+    `).get(serverId, app.name) as { id: string; status: string; route_active: number | null } | undefined;
 
     if (deployment) {
+      const newStatus = mapAppStatusToDeploymentStatus(app.status);
+      const previousStatus = deployment.status;
+      // Only consider route state if a route exists (route_active is not null)
+      const hasRoute = deployment.route_active !== null;
+      const currentRouteActive = deployment.route_active === 1;
+      const shouldRouteBeActive = newStatus === 'running';
+
       await mutexManager.withDeploymentLock(deployment.id, async () => {
-        const deploymentStatus = mapAppStatusToDeploymentStatus(app.status);
         // Only update if not in a transient state (command results have priority)
-        db.prepare(`
+        const result = db.prepare(`
           UPDATE deployments SET status = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND status != 'installing' AND status != 'configuring' AND status != 'uninstalling'
-        `).run(deploymentStatus, deployment.id);
+        `).run(newStatus, deployment.id);
+
+        // Check if status actually changed (update was applied and status differs)
+        const statusChanged = result.changes > 0 && previousStatus !== newStatus;
+
+        // Update route if needed (running → active, stopped/error → inactive)
+        // Only update if deployment has a proxy route
+        if (hasRoute && currentRouteActive !== shouldRouteBeActive) {
+          await proxyManager.setRouteActive(deployment.id, shouldRouteBeActive);
+          routesChanged = true;
+          wsLogger.info({
+            deploymentId: deployment.id,
+            appName: app.name,
+            routeActive: shouldRouteBeActive,
+          }, 'Route state updated based on agent status');
+        }
+
+        // Broadcast status change to UI clients (only if status actually changed)
+        if (statusChanged) {
+          broadcastDeploymentStatus({
+            deploymentId: deployment.id,
+            appName: app.name,
+            serverId,
+            status: newStatus,
+            previousStatus,
+            routeActive: hasRoute ? shouldRouteBeActive : undefined,
+          });
+        }
       });
+    }
+  }
+
+  // Reload Caddy once if any routes changed
+  if (routesChanged) {
+    try {
+      await proxyManager.updateAndReload();
+      wsLogger.info({ serverId }, 'Caddy reloaded after route updates from status report');
+    } catch (err) {
+      wsLogger.error({ serverId, err }, 'Failed to reload Caddy after route updates');
     }
   }
 
@@ -365,6 +440,7 @@ async function handleStatusReport(io: SocketServer, serverId: string, report: Ag
     serverId,
     timestamp: report.timestamp,
     metrics: report.metrics,
+    networkInfo: report.networkInfo,
     apps: report.apps,
   });
 }
@@ -731,4 +807,196 @@ export async function shutdownAgentHandler(io: import('socket.io').Server): Prom
   pendingLogRequests.clear();
 
   wsLogger.info('Agent handler shutdown complete');
+}
+
+// ==================
+// Mount Storage Support
+// ==================
+
+interface ServerMountRow {
+  id: string;
+  server_id: string;
+  mount_id: string;
+  mount_point: string;
+  options: string | null;
+  purpose: string | null;
+  auto_mount: number;
+  status: string;
+  mount_type: string;
+  source: string;
+  default_options: string | null;
+}
+
+interface MountCredentialsRow {
+  data: string;
+}
+
+/**
+ * Send a mount-related command to an agent and wait for result.
+ * Returns a promise that resolves with the command result.
+ */
+export function sendMountCommand(
+  serverId: string,
+  command: {
+    id: string;
+    action: 'mountStorage' | 'unmountStorage' | 'checkMount';
+    appName: string;
+    payload: { mountOptions: import('@ownprem/shared').MountCommandPayload };
+  }
+): Promise<import('@ownprem/shared').CommandResult> {
+  const conn = connectedAgents.get(serverId);
+  if (!conn) {
+    return Promise.reject(new Error(`Agent not connected: ${serverId}`));
+  }
+
+  return new Promise((resolve, reject) => {
+    // Set up ack timeout
+    const ackTimeout = setTimeout(() => {
+      const pending = pendingCommands.get(command.id);
+      if (pending && !pending.acknowledged) {
+        pendingCommands.delete(command.id);
+        reject(new Error('Agent did not acknowledge command'));
+      }
+    }, ACK_TIMEOUT);
+
+    // Track the pending command
+    pendingCommands.set(command.id, {
+      resolve,
+      reject,
+      ackTimeout,
+      acknowledged: false,
+      deploymentId: undefined,
+      action: command.action,
+      serverId,
+    });
+
+    conn.socket.emit('command', command);
+    wsLogger.info({ serverId, action: command.action, commandId: command.id }, 'Mount command sent');
+  });
+}
+
+/**
+ * Auto-mount storage for a server on agent connect.
+ * Checks all server_mounts with auto_mount=true and mounts them if not already mounted.
+ */
+async function autoMountServerStorage(serverId: string): Promise<void> {
+  const db = getDb();
+
+  // Get all mounts for this server that should be auto-mounted
+  const serverMounts = db.prepare(`
+    SELECT sm.*, m.mount_type, m.source, m.default_options
+    FROM server_mounts sm
+    JOIN mounts m ON m.id = sm.mount_id
+    WHERE sm.server_id = ? AND sm.auto_mount = TRUE
+  `).all(serverId) as ServerMountRow[];
+
+  if (serverMounts.length === 0) {
+    return;
+  }
+
+  wsLogger.info({ serverId, mountCount: serverMounts.length }, 'Auto-mounting storage');
+
+  for (const sm of serverMounts) {
+    try {
+      // First check if already mounted
+      const checkId = `check-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const checkResult = await sendMountCommand(serverId, {
+        id: checkId,
+        action: 'checkMount',
+        appName: 'storage',
+        payload: {
+          mountOptions: {
+            mountType: sm.mount_type as 'nfs' | 'cifs',
+            source: sm.source,
+            mountPoint: sm.mount_point,
+          },
+        },
+      });
+
+      if (checkResult.status === 'success' && isMountCheckResult(checkResult.data) && checkResult.data.mounted) {
+        // Already mounted, update status and usage
+        db.prepare(`
+          UPDATE server_mounts
+          SET status = 'mounted',
+              usage_bytes = ?,
+              total_bytes = ?,
+              last_checked = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(
+          checkResult.data.usage?.used ?? null,
+          checkResult.data.usage?.total ?? null,
+          sm.id
+        );
+        wsLogger.info({ serverId, mountPoint: sm.mount_point }, 'Mount already mounted');
+        continue;
+      }
+
+      // Not mounted, need to mount
+      db.prepare(`
+        UPDATE server_mounts SET status = 'mounting', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(sm.id);
+
+      // Get credentials for CIFS mounts
+      let credentials: { username: string; password: string; domain?: string } | undefined;
+      if (sm.mount_type === 'cifs') {
+        const { secretsManager } = await import('../services/secretsManager.js');
+        const credRow = db.prepare(`
+          SELECT data FROM mount_credentials WHERE mount_id = ?
+        `).get(sm.mount_id) as MountCredentialsRow | undefined;
+
+        if (credRow) {
+          credentials = secretsManager.decrypt(credRow.data) as typeof credentials;
+        }
+      }
+
+      const mountId = `mount-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const mountResult = await sendMountCommand(serverId, {
+        id: mountId,
+        action: 'mountStorage',
+        appName: 'storage',
+        payload: {
+          mountOptions: {
+            mountType: sm.mount_type as 'nfs' | 'cifs',
+            source: sm.source,
+            mountPoint: sm.mount_point,
+            options: sm.options || sm.default_options || undefined,
+            credentials,
+          },
+        },
+      });
+
+      if (mountResult.status === 'success') {
+        db.prepare(`
+          UPDATE server_mounts
+          SET status = 'mounted',
+              status_message = NULL,
+              last_checked = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(sm.id);
+        wsLogger.info({ serverId, mountPoint: sm.mount_point }, 'Mount successful');
+      } else {
+        db.prepare(`
+          UPDATE server_mounts
+          SET status = 'error',
+              status_message = ?,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(mountResult.message || 'Mount failed', sm.id);
+        wsLogger.error({ serverId, mountPoint: sm.mount_point, error: mountResult.message }, 'Mount failed');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      db.prepare(`
+        UPDATE server_mounts
+        SET status = 'error',
+            status_message = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(errorMessage, sm.id);
+      wsLogger.error({ serverId, mountPoint: sm.mount_point, err }, 'Error auto-mounting storage');
+    }
+  }
 }

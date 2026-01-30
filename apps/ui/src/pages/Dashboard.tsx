@@ -1,27 +1,44 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, Package, Activity, ExternalLink, Cpu, MemoryStick, HardDrive } from 'lucide-react';
-import { useServers, useDeployments, useSystemStatus } from '../hooks/useApi';
+import { Server, Package, Activity, ExternalLink } from 'lucide-react';
+import { useServers, useDeployments, useSystemStatus, useApps, useStartDeployment, useStopDeployment, useRestartDeployment, useUninstallDeployment } from '../hooks/useApi';
+import { useAuthStore } from '../stores/useAuthStore';
 import ServerCard from '../components/ServerCard';
 import StatusBadge from '../components/StatusBadge';
-import { AggregatedMetricsChart } from '../components/MetricsChart';
 import { useMetricsStore } from '../stores/useMetricsStore';
 
 export default function Dashboard() {
   const { data: servers, isLoading: serversLoading } = useServers();
   const { data: deployments, isLoading: deploymentsLoading } = useDeployments();
+  const { data: apps } = useApps();
   const { data: status } = useSystemStatus();
+  const { user } = useAuthStore();
+
+  const startMutation = useStartDeployment();
+  const stopMutation = useStopDeployment();
+  const restartMutation = useRestartDeployment();
+  const uninstallMutation = useUninstallDeployment();
+
+  const canManage = user?.isSystemAdmin ?? false;
+  const canOperate = user?.isSystemAdmin || user?.groups?.some(g => g.role === 'admin' || g.role === 'operator') || false;
   const addMetrics = useMetricsStore((state) => state.addMetrics);
 
   const runningDeployments = deployments?.filter((d) => d.status === 'running') || [];
+
+  const getAppDisplayName = (appName: string) => {
+    const app = apps?.find(a => a.name === appName);
+    return app?.displayName || appName;
+  };
+
+  const getServerName = (serverId: string) => {
+    const server = servers?.find(s => s.id === serverId);
+    return server?.name || serverId;
+  };
   const appsWithWebUI = runningDeployments.filter((d) => {
     // We'd need the manifest to know if it has webui
     // For now, check common apps
     return ['mempool', 'rtl', 'thunderhub', 'mock-app'].includes(d.appName);
   });
-
-  const onlineServers = servers?.filter((s) => s.agentStatus === 'online') || [];
-  const serverIds = onlineServers.map((s) => s.id);
 
   // Seed metrics from server data on load
   useEffect(() => {
@@ -65,33 +82,6 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Resource Usage Charts */}
-      {serverIds.length > 0 && (
-        <section>
-          <h2 className="text-base md:text-lg font-semibold mb-3 md:mb-4">Resource Usage</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <ChartCard
-              icon={<Cpu size={16} className="text-amber-500" />}
-              title="CPU Usage"
-              serverIds={serverIds}
-              metric="cpu"
-            />
-            <ChartCard
-              icon={<MemoryStick size={16} className="text-blue-500" />}
-              title="Memory Usage"
-              serverIds={serverIds}
-              metric="memory"
-            />
-            <ChartCard
-              icon={<HardDrive size={16} className="text-emerald-500" />}
-              title="Disk Usage"
-              serverIds={serverIds}
-              metric="disk"
-            />
-          </div>
-        </section>
-      )}
-
       {/* Servers */}
       <section>
         <div className="flex items-center justify-between mb-3 md:mb-4">
@@ -107,14 +97,21 @@ export default function Dashboard() {
         {serversLoading ? (
           <div className="text-muted">Loading...</div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 min-[1800px]:grid-cols-3 gap-4">
             {servers?.slice(0, 3).map((server) => {
               const serverDeployments = deployments?.filter((d) => d.serverId === server.id) || [];
               return (
                 <ServerCard
                   key={server.id}
                   server={server}
-                  deploymentCount={serverDeployments.length}
+                  deployments={serverDeployments}
+                  apps={apps}
+                  canManage={canManage}
+                  canOperate={canOperate}
+                  onStartApp={(id) => startMutation.mutate(id)}
+                  onStopApp={(id) => stopMutation.mutate(id)}
+                  onRestartApp={(id) => restartMutation.mutate(id)}
+                  onUninstallApp={(id) => uninstallMutation.mutate(id)}
                 />
               );
             })}
@@ -182,11 +179,11 @@ export default function Dashboard() {
               {deployments?.map((deployment) => (
                 <div key={deployment.id} className="p-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium">{deployment.appName}</span>
+                    <span className="font-medium">{getAppDisplayName(deployment.appName)}</span>
                     <StatusBadge status={deployment.status} size="sm" />
                   </div>
                   <div className="flex items-center justify-between text-xs text-muted">
-                    <span>{deployment.serverId}</span>
+                    <span>{getServerName(deployment.serverId)}</span>
                     <span>v{deployment.version}</span>
                   </div>
                 </div>
@@ -207,9 +204,9 @@ export default function Dashboard() {
                 <tbody>
                   {deployments?.map((deployment) => (
                     <tr key={deployment.id} className="table-row last:border-0">
-                      <td className="px-4 py-3 font-medium">{deployment.appName}</td>
+                      <td className="px-4 py-3 font-medium">{getAppDisplayName(deployment.appName)}</td>
                       <td className="px-4 py-3 text-muted">
-                        {deployment.serverId}
+                        {getServerName(deployment.serverId)}
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={deployment.status} size="sm" />
@@ -252,24 +249,3 @@ function StatCard({
   );
 }
 
-function ChartCard({
-  icon,
-  title,
-  serverIds,
-  metric,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  serverIds: string[];
-  metric: 'cpu' | 'memory' | 'disk';
-}) {
-  return (
-    <div className="card p-3 md:p-4">
-      <div className="flex items-center gap-2 mb-3">
-        {icon}
-        <span className="text-sm font-medium">{title}</span>
-      </div>
-      <AggregatedMetricsChart serverIds={serverIds} metric={metric} height={120} />
-    </div>
-  );
-}

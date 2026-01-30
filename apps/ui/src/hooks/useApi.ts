@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api, CreateMountData, UpdateMountData, AssignMountData } from '../api/client';
 
 // Server queries
 export function useServers() {
@@ -19,10 +19,10 @@ export function useServer(id: string) {
 }
 
 // App queries
-export function useApps() {
+export function useApps(includeSystem = true) {
   return useQuery({
-    queryKey: ['apps'],
-    queryFn: api.getApps,
+    queryKey: ['apps', includeSystem],
+    queryFn: () => api.getApps(includeSystem),
   });
 }
 
@@ -124,5 +124,100 @@ export function useValidateInstall(serverId: string, appName: string) {
     queryKey: ['validate', serverId, appName],
     queryFn: () => api.validateInstall(serverId, appName),
     enabled: !!serverId && !!appName,
+  });
+}
+
+// Mount queries
+export function useMounts() {
+  return useQuery({
+    queryKey: ['mounts'],
+    queryFn: api.getMounts,
+  });
+}
+
+export function useServerMounts() {
+  return useQuery({
+    queryKey: ['serverMounts'],
+    queryFn: api.getServerMounts,
+    refetchInterval: 30000,
+  });
+}
+
+// Mount mutations
+export function useCreateMount() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreateMountData) => api.createMount(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mounts'] });
+    },
+  });
+}
+
+export function useUpdateMount() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateMountData }) => api.updateMount(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mounts'] });
+    },
+  });
+}
+
+export function useDeleteMount() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.deleteMount(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['mounts'] });
+      queryClient.invalidateQueries({ queryKey: ['serverMounts'] });
+    },
+  });
+}
+
+export function useAssignMount() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: AssignMountData) => api.assignMountToServer(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['serverMounts'] });
+    },
+  });
+}
+
+export function useMountStorage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (serverMountId: string) => api.mountStorage(serverMountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['serverMounts'] });
+    },
+  });
+}
+
+export function useUnmountStorage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (serverMountId: string) => api.unmountStorage(serverMountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['serverMounts'] });
+    },
+  });
+}
+
+export function useDeleteServerMount() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (serverMountId: string) => api.deleteServerMount(serverMountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['serverMounts'] });
+    },
   });
 }

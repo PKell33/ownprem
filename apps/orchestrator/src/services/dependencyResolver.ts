@@ -75,7 +75,7 @@ export class DependencyResolver {
     for (const req of manifest.requires || []) {
       const resolved = await this.resolveService(req, targetServerId);
 
-      if (resolved) {
+      if (resolved && req.injectAs) {
         // Inject host
         if (req.injectAs.host) {
           config[req.injectAs.host] = resolved.host;
@@ -142,7 +142,7 @@ export class DependencyResolver {
 
     // Get credentials if needed
     let credentials: Record<string, string> | undefined;
-    if (req.injectAs.credentials) {
+    if (req.injectAs?.credentials) {
       const fields = Object.keys(req.injectAs.credentials);
       const creds = await secretsManager.getServiceCredentials(service.deploymentId, fields);
       if (creds) {

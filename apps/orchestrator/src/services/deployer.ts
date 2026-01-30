@@ -1,15 +1,24 @@
 import { v4 as uuidv4 } from 'uuid';
+import { readFile } from 'fs/promises';
 import { getDb, runInTransaction } from '../db/index.js';
 import { secretsManager } from './secretsManager.js';
 import { configRenderer } from './configRenderer.js';
 import { serviceRegistry } from './serviceRegistry.js';
 import { dependencyResolver } from './dependencyResolver.js';
 import { proxyManager } from './proxyManager.js';
+import { caddyHAManager } from './caddyHAManager.js';
 import { sendCommand, isAgentConnected } from '../websocket/agentHandler.js';
 import { mutexManager } from '../lib/mutexManager.js';
 import logger from '../lib/logger.js';
 import { auditService } from './auditService.js';
 import type { AppManifest, Deployment, DeploymentStatus, ConfigFile } from '@ownprem/shared';
+
+// CA certificate paths to check (in order of preference)
+const CA_CERT_PATHS = [
+  '/etc/step-ca/root_ca.crt',           // Step-CA root (preferred)
+  '/etc/caddy/ca-root.crt',             // Copied step-ca root
+  '/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt',  // Caddy internal CA
+];
 
 // Type for compensating transactions (rollback functions)
 type CompensationFn = () => Promise<void>;
@@ -31,6 +40,9 @@ interface DeploymentRow {
 interface AppRegistryRow {
   name: string;
   manifest: string;
+  system: number;
+  mandatory: number;
+  singleton: number;
 }
 
 interface ServerRow {
@@ -56,16 +68,26 @@ export class Deployer {
     }
 
     // Get app manifest
-    const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(appName) as AppRegistryRow | undefined;
+    const appRow = db.prepare('SELECT * FROM app_registry WHERE name = ?').get(appName) as AppRegistryRow | undefined;
     if (!appRow) {
       throw new Error(`App ${appName} not found in registry`);
     }
     const manifest = JSON.parse(appRow.manifest) as AppManifest;
+    const isSingleton = appRow.singleton === 1;
 
-    // Check for existing deployment
+    // Check for existing deployment on this server
     const existing = db.prepare('SELECT id FROM deployments WHERE server_id = ? AND app_name = ?').get(serverId, appName);
     if (existing) {
       throw new Error(`App ${appName} is already deployed on ${serverId}`);
+    }
+
+    // Check singleton constraint (only one instance allowed across all servers)
+    if (isSingleton) {
+      const existingAny = db.prepare('SELECT server_id FROM deployments WHERE app_name = ?').get(appName) as { server_id: string } | undefined;
+      if (existingAny) {
+        const serverName = db.prepare('SELECT name FROM servers WHERE id = ?').get(existingAny.server_id) as { name: string } | undefined;
+        throw new Error(`App ${appName} is a singleton and is already deployed on ${serverName?.name || existingAny.server_id}`);
+      }
     }
 
     // Check for conflicts with already installed apps
@@ -193,11 +215,37 @@ export class Deployer {
         configFiles.push(stopScript);
       }
 
+      // For Caddy deployments, include the CA root certificate so it can trust step-ca
+      if (appName === 'ownprem-caddy') {
+        const caCert = await this.getCACertificate();
+        if (caCert) {
+          configFiles.push({
+            path: '/etc/caddy/ca-root.crt',
+            content: caCert,
+            mode: '0644',
+          });
+          logger.info({ deploymentId }, 'Including CA root certificate for Caddy deployment');
+        }
+      }
+
       // Build environment variables for install
       const env: Record<string, string> = {
         SERVER_ID: serverId,
         APP_NAME: appName,
         APP_VERSION: appVersion,
+      };
+
+      // Build metadata for the app (used by agent for status reporting and privileged setup)
+      const metadata: Record<string, unknown> = {
+        name: appName,
+        displayName: manifest.displayName,
+        version: appVersion,
+        serviceName: manifest.logging?.serviceName || appName,
+        // Privileged setup info
+        serviceUser: manifest.serviceUser,
+        serviceGroup: manifest.serviceGroup || manifest.serviceUser,
+        dataDirectories: manifest.dataDirectories,
+        capabilities: manifest.capabilities,
       };
 
       // Add non-secret config to env
@@ -222,6 +270,7 @@ export class Deployer {
           version: appVersion,
           files: configFiles,
           env,
+          metadata,
         },
       }, deploymentId);
 
@@ -274,6 +323,19 @@ export class Deployer {
         resourceId: deploymentId,
         details: { appName, serverId, version: appVersion },
       });
+
+      // Auto-register Caddy deployments with HA manager
+      if (appName === 'ownprem-caddy') {
+        try {
+          await caddyHAManager.registerInstance(deploymentId, {
+            adminApiUrl: `http://${serverHost}:2019`,
+          });
+          logger.info({ deploymentId }, 'Auto-registered Caddy instance with HA manager');
+        } catch (err) {
+          // Don't fail deployment if HA registration fails
+          logger.warn({ deploymentId, err }, 'Failed to auto-register Caddy instance with HA manager');
+        }
+      }
 
       return (await this.getDeployment(deploymentId))!;
     } catch (error) {
@@ -341,8 +403,9 @@ export class Deployer {
       UPDATE deployments SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `).run(deploymentId);
 
-    // Enable proxy route
+    // Enable proxy route and reload Caddy
     await proxyManager.setRouteActive(deploymentId, true);
+    await proxyManager.updateAndReload();
 
     // Send start command
     const commandId = uuidv4();
@@ -377,8 +440,9 @@ export class Deployer {
       UPDATE deployments SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `).run(deploymentId);
 
-    // Disable proxy route
+    // Disable proxy route and reload Caddy
     await proxyManager.setRouteActive(deploymentId, false);
+    await proxyManager.updateAndReload();
 
     // Send stop command
     const commandId = uuidv4();
@@ -438,6 +502,14 @@ export class Deployer {
 
     const db = getDb();
 
+    // Check if this is a mandatory app on the core server
+    const appRow = db.prepare('SELECT mandatory FROM app_registry WHERE name = ?').get(deployment.appName) as { mandatory: number } | undefined;
+    const server = db.prepare('SELECT is_core FROM servers WHERE id = ?').get(deployment.serverId) as { is_core: number } | undefined;
+
+    if (appRow?.mandatory === 1 && server?.is_core === 1) {
+      throw new Error(`App ${deployment.appName} is mandatory and cannot be uninstalled from the core server`);
+    }
+
     // Update status to uninstalling first
     db.prepare(`
       UPDATE deployments SET status = 'uninstalling', updated_at = CURRENT_TIMESTAMP WHERE id = ?
@@ -454,6 +526,19 @@ export class Deployer {
     // Remove proxy routes (DB operations, done before transaction to use async proxyManager)
     await proxyManager.unregisterRoute(deploymentId);
     await proxyManager.unregisterServiceRoutesByDeployment(deploymentId);
+
+    // Unregister Caddy instance from HA manager if this is a Caddy deployment
+    if (deployment.appName === 'ownprem-caddy') {
+      try {
+        const instance = await caddyHAManager.getInstanceByDeployment(deploymentId);
+        if (instance) {
+          await caddyHAManager.unregisterInstance(instance.id);
+          logger.info({ deploymentId }, 'Unregistered Caddy instance from HA manager');
+        }
+      } catch (err) {
+        logger.warn({ deploymentId, err }, 'Failed to unregister Caddy instance from HA manager');
+      }
+    }
 
     // Atomic transaction: services + secrets + deployment deletion
     runInTransaction(() => {
@@ -527,6 +612,24 @@ export class Deployer {
       installedAt: new Date(row.installed_at),
       updatedAt: new Date(row.updated_at),
     };
+  }
+
+  /**
+   * Get CA root certificate content for distribution to Caddy instances.
+   * Returns null if no CA certificate is available.
+   */
+  private async getCACertificate(): Promise<string | null> {
+    for (const certPath of CA_CERT_PATHS) {
+      try {
+        const content = await readFile(certPath, 'utf-8');
+        logger.debug({ certPath }, 'Found CA certificate');
+        return content;
+      } catch {
+        // Try next path
+      }
+    }
+    logger.debug('No CA certificate found for distribution');
+    return null;
   }
 }
 

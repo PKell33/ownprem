@@ -281,8 +281,9 @@ export const api = {
   },
 
   // Apps
-  async getApps() {
-    return fetchWithAuth<AppManifest[]>(`${API_BASE}/apps`);
+  async getApps(includeSystem = true) {
+    const params = includeSystem ? '?includeSystem=true' : '';
+    return fetchWithAuth<AppManifest[]>(`${API_BASE}/apps${params}`);
   },
 
   async getApp(name: string) {
@@ -499,6 +500,179 @@ export const api = {
       method: 'DELETE',
     });
   },
+
+  // Mounts
+  async getMounts() {
+    return fetchWithAuth<Mount[]>(`${API_BASE}/mounts`);
+  },
+
+  async getMount(id: string) {
+    return fetchWithAuth<Mount>(`${API_BASE}/mounts/${id}`);
+  },
+
+  async createMount(data: CreateMountData) {
+    return fetchWithAuth<Mount>(`${API_BASE}/mounts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateMount(id: string, data: UpdateMountData) {
+    return fetchWithAuth<Mount>(`${API_BASE}/mounts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deleteMount(id: string) {
+    return fetchWithAuth<void>(`${API_BASE}/mounts/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Server Mounts
+  async getServerMounts() {
+    return fetchWithAuth<ServerMountWithDetails[]>(`${API_BASE}/mounts/servers`);
+  },
+
+  async assignMountToServer(data: AssignMountData) {
+    return fetchWithAuth<ServerMountWithDetails>(`${API_BASE}/mounts/servers`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async mountStorage(serverMountId: string) {
+    return fetchWithAuth<ServerMountWithDetails>(`${API_BASE}/mounts/servers/${serverMountId}/mount`, {
+      method: 'POST',
+    });
+  },
+
+  async unmountStorage(serverMountId: string) {
+    return fetchWithAuth<ServerMountWithDetails>(`${API_BASE}/mounts/servers/${serverMountId}/unmount`, {
+      method: 'POST',
+    });
+  },
+
+  async deleteServerMount(serverMountId: string) {
+    return fetchWithAuth<void>(`${API_BASE}/mounts/servers/${serverMountId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Caddy HA
+  async getHAConfig() {
+    return fetchWithAuth<HAConfig | { enabled: false; configured: false }>(`${API_BASE}/caddy-ha/config`);
+  },
+
+  async configureHA(data: ConfigureHAData) {
+    return fetchWithAuth<HAConfig>(`${API_BASE}/caddy-ha/config`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async setHAEnabled(enabled: boolean) {
+    return fetchWithAuth<{ success: boolean; enabled: boolean }>(`${API_BASE}/caddy-ha/config/enabled`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+  },
+
+  async getCaddyInstances() {
+    return fetchWithAuth<CaddyInstance[]>(`${API_BASE}/caddy-ha/instances`);
+  },
+
+  async registerCaddyInstance(data: RegisterCaddyInstanceData) {
+    return fetchWithAuth<CaddyInstance>(`${API_BASE}/caddy-ha/instances`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async setCaddyInstancePriority(instanceId: string, priority: number) {
+    return fetchWithAuth<{ success: boolean; priority: number }>(`${API_BASE}/caddy-ha/instances/${instanceId}/priority`, {
+      method: 'PUT',
+      body: JSON.stringify({ priority }),
+    });
+  },
+
+  async promoteCaddyInstance(instanceId: string) {
+    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/caddy-ha/instances/${instanceId}/promote`, {
+      method: 'POST',
+    });
+  },
+
+  async unregisterCaddyInstance(instanceId: string) {
+    return fetchWithAuth<void>(`${API_BASE}/caddy-ha/instances/${instanceId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async syncKeepalived() {
+    return fetchWithAuth<SyncResult>(`${API_BASE}/caddy-ha/sync/keepalived`, {
+      method: 'POST',
+    });
+  },
+
+  async syncCaddyConfig() {
+    return fetchWithAuth<{ success: boolean; error?: string }>(`${API_BASE}/caddy-ha/sync/config`, {
+      method: 'POST',
+    });
+  },
+
+  // Certificates
+  async getCertificates(options?: { type?: string; includeRevoked?: boolean }) {
+    const params = new URLSearchParams();
+    if (options?.type) params.set('type', options.type);
+    if (options?.includeRevoked) params.set('includeRevoked', 'true');
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return fetchWithAuth<CertificateInfo[]>(`${API_BASE}/certificates${query}`);
+  },
+
+  async getCertificate(id: string) {
+    return fetchWithAuth<Certificate>(`${API_BASE}/certificates/${id}`);
+  },
+
+  async issueCertificate(data: IssueCertificateData) {
+    return fetchWithAuth<Certificate>(`${API_BASE}/certificates`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async renewCertificate(certId: string, validityHours?: number) {
+    return fetchWithAuth<Certificate>(`${API_BASE}/certificates/${certId}/renew`, {
+      method: 'POST',
+      body: JSON.stringify({ validityHours }),
+    });
+  },
+
+  async revokeCertificate(certId: string, reason: string) {
+    return fetchWithAuth<void>(`${API_BASE}/certificates/${certId}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
+
+  async getCertRenewalStatus() {
+    return fetchWithAuth<CertRenewalStatus>(`${API_BASE}/certificates/renewal/status`);
+  },
+
+  async triggerCertRenewal() {
+    return fetchWithAuth<CertRenewalResult>(`${API_BASE}/certificates/renewal/trigger`, {
+      method: 'POST',
+    });
+  },
+
+  async getSystemAppsStatus() {
+    return fetchWithAuth<SystemAppsStatus>(`${API_BASE}/system/apps`);
+  },
+
+  // Proxy Routes
+  async getProxyRoutes() {
+    return fetchWithAuth<ProxyRoute[]>(`${API_BASE}/proxy-routes`);
+  },
 };
 
 // Types
@@ -561,8 +735,14 @@ export interface Server {
   isCore: boolean;
   agentStatus: 'online' | 'offline' | 'error';
   metrics?: ServerMetrics;
+  networkInfo?: NetworkInfo;
   lastSeen: string | null;
   createdAt: string;
+}
+
+export interface NetworkInfo {
+  ipAddress: string | null;
+  macAddress: string | null;
 }
 
 export interface ServerMetrics {
@@ -599,6 +779,10 @@ export interface AppManifest {
     minMemory?: string;
     minDisk?: string;
   };
+  // System app properties
+  system?: boolean;
+  mandatory?: boolean;
+  singleton?: boolean;
 }
 
 export interface ConfigField {
@@ -756,6 +940,76 @@ export interface PaginatedResponse<T> {
   };
 }
 
+// Mount types
+export type MountType = 'nfs' | 'cifs';
+export type MountStatus = 'pending' | 'mounting' | 'mounted' | 'unmounted' | 'error';
+
+export interface Mount {
+  id: string;
+  name: string;
+  mountType: MountType;
+  source: string;
+  defaultOptions: string | null;
+  hasCredentials: boolean;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ServerMount {
+  id: string;
+  serverId: string;
+  mountId: string;
+  mountPoint: string;
+  options: string | null;
+  purpose: string | null;
+  autoMount: boolean;
+  status: MountStatus;
+  statusMessage: string | null;
+  lastChecked: string | null;
+  usageBytes: number | null;
+  totalBytes: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ServerMountWithDetails extends ServerMount {
+  mount: Mount;
+  serverName: string;
+}
+
+export interface MountCredentials {
+  username: string;
+  password: string;
+  domain?: string;
+}
+
+export interface CreateMountData {
+  name: string;
+  mountType: MountType;
+  source: string;
+  defaultOptions?: string;
+  description?: string;
+  credentials?: MountCredentials;
+}
+
+export interface UpdateMountData {
+  name?: string;
+  source?: string;
+  defaultOptions?: string | null;
+  description?: string | null;
+  credentials?: MountCredentials | null;
+}
+
+export interface AssignMountData {
+  serverId: string;
+  mountId: string;
+  mountPoint: string;
+  options?: string;
+  purpose?: string;
+  autoMount?: boolean;
+}
+
 /**
  * Helper to normalize responses that may or may not be paginated.
  * Returns the data array whether the response is paginated or not.
@@ -765,4 +1019,133 @@ export function extractData<T>(response: T[] | PaginatedResponse<T>): T[] {
     return response;
   }
   return response.data;
+}
+
+// Caddy HA types
+export interface HAConfig {
+  id: string;
+  vipAddress: string;
+  vipInterface: string;
+  vrrpRouterId: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConfigureHAData {
+  vipAddress: string;
+  vipInterface?: string;
+  vrrpRouterId?: number;
+  vrrpAuthPass?: string;
+}
+
+export interface CaddyInstance {
+  id: string;
+  deploymentId: string;
+  haConfigId: string | null;
+  vrrpPriority: number;
+  isPrimary: boolean;
+  adminApiUrl: string | null;
+  lastConfigSync: string | null;
+  lastCertSync: string | null;
+  status: 'pending' | 'active' | 'error';
+  statusMessage: string | null;
+  serverId: string;
+  serverName: string;
+  serverHost: string | null;
+  deploymentStatus: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RegisterCaddyInstanceData {
+  deploymentId: string;
+  vrrpPriority?: number;
+  isPrimary?: boolean;
+  adminApiUrl?: string;
+}
+
+export interface SyncResult {
+  success: boolean;
+  results: Array<{
+    instanceId: string;
+    success: boolean;
+    error?: string;
+  }>;
+}
+
+// Certificate types
+export interface CertificateInfo {
+  id: string;
+  name: string;
+  type: 'server' | 'client' | 'ca';
+  subjectCn: string;
+  subjectSans: string[] | null;
+  serialNumber: string;
+  notBefore: string;
+  notAfter: string;
+  issuedToServerId: string | null;
+  issuedToDeploymentId: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  expiresInDays: number;
+}
+
+export interface Certificate extends CertificateInfo {
+  certPem: string;
+  keyPem: string;
+  caCertPem: string;
+}
+
+export interface IssueCertificateData {
+  name: string;
+  type: 'server' | 'client';
+  commonName: string;
+  sans?: string[];
+  validityHours?: number;
+  issuedToServerId?: string;
+  issuedToDeploymentId?: string;
+}
+
+export interface CertRenewalStatus {
+  nextCheckAt: string | null;
+  thresholdDays: number;
+  expiringCount: number;
+  expiringSoon: Array<{
+    id: string;
+    name: string;
+    cn: string;
+    expiresAt: string;
+    daysUntilExpiry: number;
+  }>;
+}
+
+export interface CertRenewalResult {
+  checked: number;
+  renewed: number;
+  failed: number;
+  details: Array<{
+    certId: string;
+    name: string;
+    success: boolean;
+    error?: string;
+  }>;
+}
+
+export interface SystemAppsStatus {
+  apps: Array<{
+    name: string;
+    displayName: string;
+    installed: boolean;
+    status?: string;
+  }>;
+  allInstalled: boolean;
+}
+
+export interface ProxyRoute {
+  path: string;
+  upstream: string;
+  appName: string;
+  serverName: string;
+  active: boolean;
 }

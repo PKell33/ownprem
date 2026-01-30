@@ -1,7 +1,8 @@
 import { spawnSync, spawn, ChildProcess } from 'child_process';
-import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, statSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, statSync, unlinkSync } from 'fs';
 import { dirname, resolve, normalize } from 'path';
-import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult } from '@ownprem/shared';
+import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult, MountCommandPayload, MountCheckResult } from '@ownprem/shared';
+import { privilegedClient } from './privilegedClient.js';
 
 // Allowed base directories for file operations
 const ALLOWED_PATH_PREFIXES = [
@@ -9,6 +10,11 @@ const ALLOWED_PATH_PREFIXES = [
   '/etc/ownprem/',
   '/var/lib/ownprem/',
   '/var/log/ownprem/',
+  // System app paths (for CA and Caddy)
+  '/etc/caddy/',
+  '/etc/step-ca/',
+  '/var/lib/caddy/',
+  '/var/lib/step-ca/',
 ];
 
 // Valid owner format: user or user:group (alphanumeric, underscore, hyphen)
@@ -22,6 +28,38 @@ const APP_NAME_PATTERN = /^[a-zA-Z0-9_.-]+$/;
 
 // Maximum log lines to return
 const MAX_LOG_LINES = 1000;
+
+// Mount point validation: must be absolute path with allowed characters
+const MOUNT_POINT_PATTERN = /^\/[a-zA-Z0-9/_-]+$/;
+
+// NFS source validation: host:/path
+const NFS_SOURCE_PATTERN = /^[a-zA-Z0-9.-]+:\/[a-zA-Z0-9/_-]+$/;
+
+// CIFS source validation: //host/share
+const CIFS_SOURCE_PATTERN = /^\/\/[a-zA-Z0-9.-]+\/[a-zA-Z0-9_-]+$/;
+
+// Allowed mount options whitelist
+const ALLOWED_MOUNT_OPTIONS = new Set([
+  // NFS options
+  'vers=3', 'vers=4', 'vers=4.0', 'vers=4.1', 'vers=4.2',
+  'rw', 'ro', 'sync', 'async',
+  'noatime', 'atime', 'nodiratime', 'relatime',
+  'hard', 'soft', 'intr', 'nointr',
+  'rsize=8192', 'rsize=16384', 'rsize=32768', 'rsize=65536', 'rsize=131072', 'rsize=262144', 'rsize=524288', 'rsize=1048576',
+  'wsize=8192', 'wsize=16384', 'wsize=32768', 'wsize=65536', 'wsize=131072', 'wsize=262144', 'wsize=524288', 'wsize=1048576',
+  'timeo=60', 'timeo=120', 'timeo=300', 'timeo=600',
+  'retrans=2', 'retrans=3', 'retrans=5',
+  'tcp', 'udp',
+  'nfsvers=3', 'nfsvers=4', 'nfsvers=4.0', 'nfsvers=4.1', 'nfsvers=4.2',
+  // CIFS options
+  'uid=1000', 'gid=1000', 'uid=0', 'gid=0',
+  'file_mode=0755', 'file_mode=0644', 'dir_mode=0755', 'dir_mode=0644',
+  'nobrl', 'nolock', 'noperm',
+  'sec=ntlm', 'sec=ntlmv2', 'sec=ntlmssp', 'sec=krb5', 'sec=krb5i', 'sec=none',
+  'iocharset=utf8',
+  // Common options
+  'defaults', 'noexec', 'nosuid', 'nodev',
+]);
 
 export class Executor {
   private runningProcesses: Map<string, ChildProcess> = new Map();
@@ -98,12 +136,59 @@ export class Executor {
     const appDir = `${this.appsDir}/${appName}`;
     mkdirSync(appDir, { recursive: true });
 
-    // Write config files
+    const metadata = payload.metadata;
+    const serviceUser = metadata?.serviceUser;
+    const serviceGroup = metadata?.serviceGroup || serviceUser;
+    const dataDirectories = metadata?.dataDirectories || [];
+    const capabilities = metadata?.capabilities || [];
+
+    // === PRE-INSTALL: Privileged setup ===
+
+    // Create service user if specified
+    if (serviceUser) {
+      console.log(`Creating service user: ${serviceUser}`);
+      try {
+        const homeDir = dataDirectories[0]?.path || `/var/lib/${serviceUser}`;
+        const result = await privilegedClient.createServiceUser(serviceUser, homeDir);
+        if (result.success) {
+          console.log(`Service user created: ${serviceUser}`);
+        } else if (!result.error?.includes('already exists')) {
+          console.warn(`Could not create service user: ${result.error}`);
+        }
+      } catch (err) {
+        console.warn(`Failed to create service user via helper: ${err}`);
+      }
+    }
+
+    // Create data directories with correct ownership
+    for (const dir of dataDirectories) {
+      console.log(`Creating data directory: ${dir.path}`);
+      try {
+        const owner = serviceUser && serviceGroup ? `${serviceUser}:${serviceGroup}` : undefined;
+        const result = await privilegedClient.createDirectory(dir.path, owner, '755');
+        if (result.success) {
+          console.log(`Created directory: ${dir.path}`);
+        } else {
+          console.warn(`Could not create directory ${dir.path}: ${result.error}`);
+        }
+      } catch (err) {
+        console.warn(`Failed to create directory via helper: ${err}`);
+      }
+    }
+
+    // Write metadata file for status reporting
+    if (metadata) {
+      const metadataPath = `${appDir}/.ownprem.json`;
+      writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+      console.log(`Wrote metadata: ${metadataPath}`);
+    }
+
+    // Write config files (install script, configs, etc.)
     if (payload.files) {
       await this.writeFiles(payload.files);
     }
 
-    // Run install script
+    // === RUN INSTALL SCRIPT ===
     const installScript = `${appDir}/install.sh`;
     if (existsSync(installScript)) {
       await this.runScript(installScript, {
@@ -112,7 +197,65 @@ export class Executor {
         APP_NAME: appName,
         APP_VERSION: payload.version || '',
         APP_DIR: appDir,
+        SERVICE_USER: serviceUser || '',
+        SERVICE_GROUP: serviceGroup || '',
+        DATA_DIR: dataDirectories[0]?.path || '',
+        CONFIG_DIR: dataDirectories[1]?.path || '',
       });
+    }
+
+    // === POST-INSTALL: Finalize privileged setup ===
+
+    // Set capabilities on binary if specified
+    for (const cap of capabilities) {
+      const binaryPath = `${appDir}/bin/${appName.replace('ownprem-', '')}`;
+      if (existsSync(binaryPath)) {
+        console.log(`Setting capability ${cap} on ${binaryPath}`);
+        try {
+          const result = await privilegedClient.setCapability(binaryPath, cap);
+          if (!result.success) {
+            console.warn(`Could not set capability: ${result.error}`);
+          }
+        } catch (err) {
+          console.warn(`Failed to set capability via helper: ${err}`);
+        }
+      }
+    }
+
+    // Copy systemd service template if it exists
+    const serviceName = metadata?.serviceName || appName;
+    const serviceTemplate = `${appDir}/templates/${serviceName}.service`;
+    if (existsSync(serviceTemplate)) {
+      console.log(`Installing systemd service: ${serviceName}`);
+      try {
+        // Read template and substitute variables
+        let serviceContent = readFileSync(serviceTemplate, 'utf-8');
+        serviceContent = serviceContent
+          .replace(/\$\{APP_DIR\}/g, appDir)
+          .replace(/\$\{DATA_DIR\}/g, dataDirectories[0]?.path || '')
+          .replace(/\$\{CONFIG_DIR\}/g, dataDirectories[1]?.path || '')
+          .replace(/\$\{SERVICE_USER\}/g, serviceUser || 'root')
+          .replace(/\$\{SERVICE_GROUP\}/g, serviceGroup || 'root');
+
+        const servicePath = `/etc/systemd/system/${serviceName}.service`;
+        const result = await privilegedClient.writeFile(servicePath, serviceContent);
+        if (result.success) {
+          console.log(`Wrote systemd service: ${servicePath}`);
+
+          // Reload systemd
+          await privilegedClient.systemctl('daemon-reload');
+
+          // Enable service
+          const enableResult = await privilegedClient.systemctl('enable', serviceName);
+          if (enableResult.success) {
+            console.log(`Enabled service: ${serviceName}`);
+          }
+        } else {
+          console.warn(`Could not write systemd service: ${result.error}`);
+        }
+      } catch (err) {
+        console.warn(`Failed to install systemd service: ${err}`);
+      }
     }
   }
 
@@ -367,16 +510,47 @@ export class Executor {
       throw new Error(`Invalid service name: ${service}`);
     }
 
-    // First try systemctl
+    // Look up the actual systemd service name from metadata
+    let actualServiceName = service;
+    const metadataPath = `${this.appsDir}/${service}/.ownprem.json`;
+    if (existsSync(metadataPath)) {
+      try {
+        const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8'));
+        if (metadata.serviceName) {
+          actualServiceName = metadata.serviceName;
+          console.log(`Using service name from metadata: ${actualServiceName} (app: ${service})`);
+        }
+      } catch {
+        // Ignore metadata parse errors, use service name as fallback
+      }
+    }
+
+    // First try privileged helper for systemctl (production mode)
     try {
-      await this.runSystemctl(action, service);
+      const result = await privilegedClient.systemctl(
+        action as 'start' | 'stop' | 'restart' | 'enable' | 'disable',
+        actualServiceName
+      );
+      if (result.success) {
+        console.log(`systemctl ${action} ${actualServiceName} succeeded via privileged helper`);
+        return;
+      }
+      console.log(`Privileged helper systemctl failed: ${result.error}, trying fallback`);
+    } catch (err) {
+      // Privileged helper not available, try direct or dev mode
+      console.log(`Privileged helper not available: ${err}, trying fallback`);
+    }
+
+    // Fallback: try direct systemctl (works if running as root in dev)
+    try {
+      await this.runSystemctl(action, actualServiceName);
       return;
     } catch (err) {
       // If systemctl fails, try dev mode fallback
-      console.log(`systemctl failed, trying dev mode fallback for ${action} ${service}`);
+      console.log(`Direct systemctl failed, trying dev mode fallback for ${action} ${service}`);
     }
 
-    // Dev mode fallback
+    // Dev mode fallback (uses start.sh/stop.sh scripts)
     const appDir = `${this.appsDir}/${service}`;
     const startScript = `${appDir}/start.sh`;
 
@@ -455,41 +629,99 @@ export class Executor {
     });
   }
 
+  /**
+   * Check if a path requires privileged access (system directories)
+   */
+  private requiresPrivilege(filePath: string): boolean {
+    const systemPrefixes = [
+      '/etc/',
+      '/var/lib/caddy/',
+      '/var/lib/step-ca/',
+      '/var/log/',
+      '/run/',
+      '/usr/',
+    ];
+    return systemPrefixes.some(prefix => filePath.startsWith(prefix));
+  }
+
   private async writeFiles(files: ConfigFile[]): Promise<void> {
     for (const file of files) {
       // Validate path to prevent path traversal attacks
       const safePath = this.validatePath(file.path);
       const dir = dirname(safePath);
 
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
+      // Check if this requires privileged access
+      const needsPrivilege = this.requiresPrivilege(safePath);
 
-      writeFileSync(safePath, file.content);
-
-      if (file.mode) {
-        // Validate mode format
-        const safeMode = this.validateMode(file.mode);
-        chmodSync(safePath, parseInt(safeMode, 8));
-      }
-
-      if (file.owner) {
+      if (needsPrivilege) {
+        // Use privileged helper for system paths
         try {
-          // Validate owner format to prevent command injection
-          const safeOwner = this.validateOwner(file.owner);
-          // Use spawnSync with array arguments to prevent shell injection
-          const result = spawnSync('chown', [safeOwner, safePath], { stdio: 'pipe' });
-          if (result.status !== 0) {
-            const stderr = result.stderr?.toString() || 'Unknown error';
+          // Create directory via privileged helper
+          if (!existsSync(dir)) {
+            const dirResult = await privilegedClient.createDirectory(dir);
+            if (!dirResult.success) {
+              console.warn(`Failed to create directory ${dir} via helper: ${dirResult.error}`);
+            }
+          }
+
+          // Write file via privileged helper
+          const writeResult = await privilegedClient.writeFile(
+            safePath,
+            file.content,
+            file.owner,
+            file.mode
+          );
+          if (!writeResult.success) {
+            throw new Error(`Failed to write ${safePath} via helper: ${writeResult.error}`);
+          }
+          console.log(`Wrote file (via helper): ${safePath}`);
+        } catch (err) {
+          // Fall back to direct write (may fail without privileges)
+          console.warn(`Privileged helper failed, attempting direct write: ${err}`);
+          await this.writeFileDirect(safePath, file);
+        }
+      } else {
+        // Direct write for non-privileged paths (e.g., /opt/ownprem/apps/)
+        await this.writeFileDirect(safePath, file);
+      }
+    }
+  }
+
+  private async writeFileDirect(safePath: string, file: ConfigFile): Promise<void> {
+    const dir = dirname(safePath);
+
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+
+    writeFileSync(safePath, file.content);
+
+    if (file.mode) {
+      // Validate mode format
+      const safeMode = this.validateMode(file.mode);
+      chmodSync(safePath, parseInt(safeMode, 8));
+    }
+
+    if (file.owner) {
+      try {
+        // Validate owner format to prevent command injection
+        const safeOwner = this.validateOwner(file.owner);
+        // Try privileged helper first for chown
+        const result = await privilegedClient.setOwnership(safePath, safeOwner);
+        if (!result.success) {
+          // Fall back to direct chown (may fail)
+          const spawnResult = spawnSync('chown', [safeOwner, safePath], { stdio: 'pipe' });
+          if (spawnResult.status !== 0) {
+            const stderr = spawnResult.stderr?.toString() || 'Unknown error';
             console.warn(`Failed to change owner of ${safePath}: ${stderr}`);
           }
-        } catch (err) {
-          console.warn(`Failed to change owner of ${safePath}: ${err}`);
         }
+      } catch (err) {
+        console.warn(`Failed to change owner of ${safePath}: ${err}`);
       }
-
-      console.log(`Wrote file: ${safePath}`);
     }
+
+    console.log(`Wrote file: ${safePath}`);
   }
 
   private async runScript(script: string, env: Record<string, string | undefined>): Promise<void> {
@@ -520,5 +752,462 @@ export class Executor {
 
       proc.on('error', reject);
     });
+  }
+
+  /**
+   * Validates mount point path
+   */
+  private validateMountPoint(mountPoint: string): string {
+    if (!MOUNT_POINT_PATTERN.test(mountPoint)) {
+      throw new Error(`Invalid mount point: ${mountPoint}. Must be an absolute path with alphanumeric characters, underscores, and hyphens.`);
+    }
+    // Normalize to prevent path traversal
+    const normalized = normalize(mountPoint);
+    if (normalized !== mountPoint || mountPoint.includes('..')) {
+      throw new Error(`Invalid mount point: path traversal attempt detected`);
+    }
+    return normalized;
+  }
+
+  /**
+   * Validates NFS or CIFS source
+   */
+  private validateMountSource(source: string, mountType: 'nfs' | 'cifs'): string {
+    if (mountType === 'nfs') {
+      if (!NFS_SOURCE_PATTERN.test(source)) {
+        throw new Error(`Invalid NFS source: ${source}. Expected format: hostname:/path`);
+      }
+    } else if (mountType === 'cifs') {
+      if (!CIFS_SOURCE_PATTERN.test(source)) {
+        throw new Error(`Invalid CIFS source: ${source}. Expected format: //hostname/share`);
+      }
+    } else {
+      throw new Error(`Unknown mount type: ${mountType}`);
+    }
+    return source;
+  }
+
+  /**
+   * Validates mount options against whitelist
+   */
+  private validateMountOptions(options: string): string {
+    const opts = options.split(',').map(o => o.trim()).filter(o => o);
+    const invalidOpts: string[] = [];
+
+    for (const opt of opts) {
+      // Check for exact match or pattern match for parameterized options
+      const isValid = ALLOWED_MOUNT_OPTIONS.has(opt) ||
+        // Allow uid/gid with any numeric value
+        /^uid=\d+$/.test(opt) ||
+        /^gid=\d+$/.test(opt) ||
+        // Allow rsize/wsize with reasonable values
+        /^rsize=\d+$/.test(opt) ||
+        /^wsize=\d+$/.test(opt) ||
+        // Allow timeo/retrans with reasonable values
+        /^timeo=\d+$/.test(opt) ||
+        /^retrans=\d+$/.test(opt) ||
+        // Allow file_mode/dir_mode with octal values
+        /^file_mode=0[0-7]{3}$/.test(opt) ||
+        /^dir_mode=0[0-7]{3}$/.test(opt);
+
+      if (!isValid) {
+        invalidOpts.push(opt);
+      }
+    }
+
+    if (invalidOpts.length > 0) {
+      throw new Error(`Invalid mount options: ${invalidOpts.join(', ')}`);
+    }
+
+    return opts.join(',');
+  }
+
+  /**
+   * Mount network storage (NFS or CIFS)
+   */
+  async mountStorage(payload: MountCommandPayload): Promise<void> {
+    const { mountType, source, mountPoint, options, credentials } = payload;
+
+    // Validate inputs (agent-side validation for early feedback)
+    const safeMountPoint = this.validateMountPoint(mountPoint);
+    const safeSource = this.validateMountSource(source, mountType);
+    const safeOptions = options ? this.validateMountOptions(options) : undefined;
+
+    // Check if already mounted
+    const checkResult = await this.checkMount(safeMountPoint);
+    if (checkResult.mounted) {
+      console.log(`Already mounted: ${safeMountPoint}`);
+      return;
+    }
+
+    console.log(`Mounting ${mountType.toUpperCase()}: ${safeSource} -> ${safeMountPoint}`);
+
+    // Use privileged helper for mount operation
+    try {
+      const result = await privilegedClient.mount(
+        mountType,
+        safeSource,
+        safeMountPoint,
+        safeOptions,
+        credentials
+      );
+
+      if (!result.success) {
+        throw new Error(`Mount failed: ${result.error}`);
+      }
+
+      console.log(`Successfully mounted: ${safeMountPoint}`);
+    } catch (err) {
+      // Privileged helper not available, try direct mount (requires root)
+      console.warn(`Privileged helper failed, attempting direct mount: ${err}`);
+      await this.mountStorageDirect(payload);
+    }
+  }
+
+  /**
+   * Direct mount (fallback when privileged helper is unavailable)
+   */
+  private async mountStorageDirect(payload: MountCommandPayload): Promise<void> {
+    const { mountType, source, mountPoint, options, credentials } = payload;
+
+    const safeMountPoint = this.validateMountPoint(mountPoint);
+    const safeSource = this.validateMountSource(source, mountType);
+    const safeOptions = options ? this.validateMountOptions(options) : null;
+
+    // Create mount point directory if it doesn't exist
+    if (!existsSync(safeMountPoint)) {
+      mkdirSync(safeMountPoint, { recursive: true });
+      console.log(`Created mount point: ${safeMountPoint}`);
+    }
+
+    // Build mount command args
+    const args: string[] = ['-t', mountType];
+
+    if (mountType === 'cifs' && credentials) {
+      // Write credentials to a temporary file with restricted permissions
+      const credFile = `/tmp/mount-creds-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      let credContent = `username=${credentials.username}\npassword=${credentials.password}\n`;
+      if (credentials.domain) {
+        credContent += `domain=${credentials.domain}\n`;
+      }
+
+      try {
+        writeFileSync(credFile, credContent, { mode: 0o600 });
+
+        const credOptions = `credentials=${credFile}`;
+        const allOptions = safeOptions ? `${credOptions},${safeOptions}` : credOptions;
+        args.push('-o', allOptions);
+        args.push(safeSource, safeMountPoint);
+
+        const result = spawnSync('mount', args, {
+          encoding: 'utf-8',
+          timeout: 30000,
+        });
+
+        if (result.status !== 0) {
+          throw new Error(`Mount failed: ${result.stderr || 'Unknown error'}`);
+        }
+      } finally {
+        // Always delete credentials file
+        try {
+          unlinkSync(credFile);
+        } catch {
+          // Ignore deletion errors
+        }
+      }
+    } else {
+      // NFS or CIFS without credentials
+      if (safeOptions) {
+        args.push('-o', safeOptions);
+      }
+      args.push(safeSource, safeMountPoint);
+
+      const result = spawnSync('mount', args, {
+        encoding: 'utf-8',
+        timeout: 30000,
+      });
+
+      if (result.status !== 0) {
+        throw new Error(`Mount failed: ${result.stderr || 'Unknown error'}`);
+      }
+    }
+
+    console.log(`Successfully mounted: ${safeMountPoint}`);
+  }
+
+  /**
+   * Unmount network storage
+   */
+  async unmountStorage(mountPoint: string): Promise<void> {
+    const safeMountPoint = this.validateMountPoint(mountPoint);
+
+    // Check if mounted
+    const checkResult = await this.checkMount(safeMountPoint);
+    if (!checkResult.mounted) {
+      console.log(`Not mounted: ${safeMountPoint}`);
+      return;
+    }
+
+    console.log(`Unmounting: ${safeMountPoint}`);
+
+    // Use privileged helper for unmount operation
+    try {
+      const result = await privilegedClient.umount(safeMountPoint);
+
+      if (!result.success) {
+        throw new Error(`Unmount failed: ${result.error}`);
+      }
+
+      console.log(`Successfully unmounted: ${safeMountPoint}`);
+    } catch (err) {
+      // Privileged helper not available, try direct umount (requires root)
+      console.warn(`Privileged helper failed, attempting direct unmount: ${err}`);
+
+      const result = spawnSync('umount', [safeMountPoint], {
+        encoding: 'utf-8',
+        timeout: 30000,
+      });
+
+      if (result.status !== 0) {
+        throw new Error(`Unmount failed: ${result.stderr || 'Unknown error'}`);
+      }
+
+      console.log(`Successfully unmounted: ${safeMountPoint}`);
+    }
+  }
+
+  /**
+   * Check if a mount point is mounted and get usage stats
+   */
+  async checkMount(mountPoint: string): Promise<MountCheckResult> {
+    const safeMountPoint = this.validateMountPoint(mountPoint);
+
+    // Use findmnt to check if mounted
+    const findmntResult = spawnSync('findmnt', ['-n', safeMountPoint], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+
+    const mounted = findmntResult.status === 0 && findmntResult.stdout.trim().length > 0;
+
+    if (!mounted) {
+      return { mounted: false };
+    }
+
+    // Get usage stats with df
+    const dfResult = spawnSync('df', ['-B1', safeMountPoint], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+
+    if (dfResult.status !== 0) {
+      return { mounted: true };
+    }
+
+    // Parse df output
+    // Format: Filesystem 1B-blocks Used Available Use% Mounted on
+    const lines = dfResult.stdout.trim().split('\n');
+    if (lines.length < 2) {
+      return { mounted: true };
+    }
+
+    const parts = lines[1].split(/\s+/);
+    if (parts.length < 4) {
+      return { mounted: true };
+    }
+
+    const total = parseInt(parts[1], 10);
+    const used = parseInt(parts[2], 10);
+
+    if (isNaN(total) || isNaN(used)) {
+      return { mounted: true };
+    }
+
+    return {
+      mounted: true,
+      usage: { used, total },
+    };
+  }
+
+  // ===============================
+  // Keepalived Management
+  // ===============================
+
+  /**
+   * Configure and manage keepalived for Caddy HA
+   */
+  async configureKeepalived(config: string, enabled: boolean): Promise<void> {
+    const keepalivedConf = '/etc/keepalived/keepalived.conf';
+    const keepalivedDir = dirname(keepalivedConf);
+
+    // Create keepalived directory via privileged helper
+    if (!existsSync(keepalivedDir)) {
+      const dirResult = await privilegedClient.createDirectory(keepalivedDir);
+      if (!dirResult.success) {
+        // Fallback to direct creation
+        mkdirSync(keepalivedDir, { recursive: true });
+      }
+      console.log(`Created keepalived directory: ${keepalivedDir}`);
+    }
+
+    // Write configuration via privileged helper
+    const writeResult = await privilegedClient.writeFile(keepalivedConf, config, undefined, '644');
+    if (!writeResult.success) {
+      // Fallback to direct write
+      writeFileSync(keepalivedConf, config, { mode: 0o644 });
+    }
+    console.log('Wrote keepalived configuration');
+
+    if (enabled) {
+      // Check if keepalived is installed
+      const whichResult = spawnSync('which', ['keepalived'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+
+      if (whichResult.status !== 0) {
+        // Install keepalived via privileged helper
+        console.log('Installing keepalived...');
+        const installResult = await privilegedClient.aptInstall(['keepalived']);
+
+        if (!installResult.success) {
+          throw new Error(`Failed to install keepalived: ${installResult.error}`);
+        }
+        console.log('Keepalived installed');
+      }
+
+      // Enable keepalived via privileged helper
+      const enableResult = await privilegedClient.systemctl('enable', 'keepalived');
+      if (!enableResult.success) {
+        console.warn(`Warning: Could not enable keepalived: ${enableResult.error}`);
+      }
+
+      // Check if service is running
+      const statusResult = spawnSync('systemctl', ['is-active', 'keepalived'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+
+      if (statusResult.stdout.trim() === 'active') {
+        // Restart to reload configuration (reload not always supported)
+        const restartResult = await privilegedClient.systemctl('restart', 'keepalived');
+        if (!restartResult.success) {
+          throw new Error(`Failed to restart keepalived: ${restartResult.error}`);
+        }
+        console.log('Keepalived configuration reloaded');
+      } else {
+        // Start the service
+        const startResult = await privilegedClient.systemctl('start', 'keepalived');
+        if (!startResult.success) {
+          throw new Error(`Failed to start keepalived: ${startResult.error}`);
+        }
+        console.log('Keepalived started');
+      }
+    } else {
+      // Stop keepalived via privileged helper
+      const stopResult = await privilegedClient.systemctl('stop', 'keepalived');
+      if (!stopResult.success) {
+        console.warn(`Warning: Could not stop keepalived: ${stopResult.error}`);
+      }
+
+      // Disable keepalived
+      await privilegedClient.systemctl('disable', 'keepalived');
+      console.log('Keepalived disabled');
+    }
+  }
+
+  /**
+   * Check keepalived status
+   */
+  async checkKeepalived(): Promise<{ installed: boolean; running: boolean; state?: string }> {
+    // Check if installed
+    const whichResult = spawnSync('which', ['keepalived'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+
+    if (whichResult.status !== 0) {
+      return { installed: false, running: false };
+    }
+
+    // Check if running
+    const statusResult = spawnSync('systemctl', ['is-active', 'keepalived'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+
+    const running = statusResult.stdout.trim() === 'active';
+
+    // Get VRRP state if running
+    let state: string | undefined;
+    if (running) {
+      try {
+        // Try to get VRRP state from /var/run/keepalived.*.pid or journalctl
+        const journalResult = spawnSync('journalctl', ['-u', 'keepalived', '-n', '50', '--no-pager'], {
+          encoding: 'utf-8',
+          timeout: 5000,
+        });
+
+        if (journalResult.status === 0) {
+          const output = journalResult.stdout;
+          // Look for state changes in log
+          const masterMatch = output.match(/Entering MASTER STATE/);
+          const backupMatch = output.match(/Entering BACKUP STATE/);
+
+          if (masterMatch && (!backupMatch || output.lastIndexOf('MASTER') > output.lastIndexOf('BACKUP'))) {
+            state = 'MASTER';
+          } else if (backupMatch) {
+            state = 'BACKUP';
+          }
+        }
+      } catch {
+        // Ignore errors getting state
+      }
+    }
+
+    return { installed: true, running, state };
+  }
+
+  /**
+   * Install and configure a TLS certificate
+   */
+  async installCertificate(certPem: string, keyPem: string, caCertPem: string | undefined, paths: {
+    certPath: string;
+    keyPath: string;
+    caPath?: string;
+  }): Promise<void> {
+    // Validate paths
+    const certPath = this.validatePath(paths.certPath);
+    const keyPath = this.validatePath(paths.keyPath);
+
+    // Create directories if needed
+    const certDir = dirname(certPath);
+    const keyDir = dirname(keyPath);
+
+    if (!existsSync(certDir)) {
+      mkdirSync(certDir, { recursive: true });
+    }
+    if (!existsSync(keyDir)) {
+      mkdirSync(keyDir, { recursive: true });
+    }
+
+    // Write certificate (readable by services)
+    writeFileSync(certPath, certPem, { mode: 0o644 });
+    console.log(`Wrote certificate to ${certPath}`);
+
+    // Write private key (restricted permissions)
+    writeFileSync(keyPath, keyPem, { mode: 0o600 });
+    console.log(`Wrote private key to ${keyPath}`);
+
+    // Write CA certificate if provided
+    if (caCertPem && paths.caPath) {
+      const caPath = this.validatePath(paths.caPath);
+      const caDir = dirname(caPath);
+      if (!existsSync(caDir)) {
+        mkdirSync(caDir, { recursive: true });
+      }
+      writeFileSync(caPath, caCertPem, { mode: 0o644 });
+      console.log(`Wrote CA certificate to ${caPath}`);
+    }
   }
 }

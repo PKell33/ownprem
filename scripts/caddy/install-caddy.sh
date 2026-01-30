@@ -55,9 +55,9 @@ else
     log_info "Caddy already installed: $(caddy version)"
 fi
 
-# Create log directory
+# Create log directory and fix ownership (including any existing files)
 mkdir -p /var/log/caddy
-chown caddy:caddy /var/log/caddy
+chown -R caddy:caddy /var/log/caddy
 
 # Backup existing Caddyfile if present
 if [[ -f /etc/caddy/Caddyfile ]]; then
@@ -85,8 +85,34 @@ fi
 log_info "Generating Caddyfile..."
 
 if [[ "$IS_LOCAL" == "true" ]]; then
-    # Local domain - use internal TLS
-    cat > /etc/caddy/Caddyfile << EOF
+    # Local domain - check if step-ca is available
+    if [[ -f /etc/step-ca/root_ca.crt ]] && systemctl is-active --quiet ownprem-ca 2>/dev/null; then
+        log_info "Using step-ca for TLS certificates"
+        cat > /etc/caddy/Caddyfile << EOF
+# Ownprem Caddyfile
+# Generated on $(date)
+# Domain: $DOMAIN (local - step-ca certificate)
+
+{
+    # Use step-ca for certificates
+    acme_ca https://ca.ownprem.local:8443/acme/acme/directory
+    acme_ca_root /etc/step-ca/root_ca.crt
+
+    # Admin API for orchestrator integration
+    admin localhost:2019
+
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+}
+
+$DOMAIN {
+EOF
+    else
+        log_info "step-ca not available, using Caddy's internal CA"
+        cat > /etc/caddy/Caddyfile << EOF
 # Ownprem Caddyfile
 # Generated on $(date)
 # Domain: $DOMAIN (local - self-signed certificate)
@@ -95,11 +121,21 @@ if [[ "$IS_LOCAL" == "true" ]]; then
     # Use Caddy's internal CA for local domains
     local_certs
     skip_install_trust
+
+    # Admin API for orchestrator integration
+    admin localhost:2019
+
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
 }
 
 $DOMAIN {
     tls internal
 EOF
+    fi
 else
     # Public domain - use Let's Encrypt
     cat > /etc/caddy/Caddyfile << EOF
@@ -191,6 +227,10 @@ www.$DOMAIN {
 }
 EOF
 
+# Create log directory with proper ownership (including any existing files)
+mkdir -p /var/log/caddy
+chown -R caddy:caddy /var/log/caddy
+
 # Validate configuration
 log_info "Validating Caddyfile..."
 if ! caddy validate --config /etc/caddy/Caddyfile; then
@@ -208,6 +248,37 @@ if [[ -f "$ORCHESTRATOR_ENV" ]]; then
         echo "CORS_ORIGIN=https://$DOMAIN" >> "$ORCHESTRATOR_ENV"
     fi
 fi
+
+# Create reload script for orchestrator integration
+log_info "Creating orchestrator reload hook..."
+mkdir -p /opt/ownprem/scripts
+cat > /opt/ownprem/scripts/caddy-reload-proxy.sh << 'SCRIPT'
+#!/bin/bash
+# Wait for orchestrator and trigger proxy reload
+# This ensures Caddy gets the correct TLS config from orchestrator
+for i in {1..10}; do
+    if curl -sf -X POST http://localhost:3001/api/proxy-routes/reload >/dev/null 2>&1; then
+        exit 0
+    fi
+    sleep 1
+done
+exit 0
+SCRIPT
+chmod +x /opt/ownprem/scripts/caddy-reload-proxy.sh
+
+# Create systemd override for orchestrator integration
+log_info "Configuring Caddy systemd service..."
+mkdir -p /etc/systemd/system/caddy.service.d
+cat > /etc/systemd/system/caddy.service.d/ownprem.conf << EOF
+[Unit]
+After=network-online.target ownprem-orchestrator.service
+Wants=network-online.target
+
+[Service]
+ExecStartPost=/opt/ownprem/scripts/caddy-reload-proxy.sh
+EOF
+
+systemctl daemon-reload
 
 # Enable and start Caddy
 log_info "Enabling Caddy service..."

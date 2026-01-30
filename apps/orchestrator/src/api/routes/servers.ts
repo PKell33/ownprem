@@ -6,7 +6,7 @@ import { validateBody, validateParams, schemas } from '../middleware/validate.js
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { hashToken } from '../../websocket/agentHandler.js';
 import { parsePaginationParams, paginateOrReturnAll } from '../../lib/pagination.js';
-import type { Server, ServerMetrics } from '@ownprem/shared';
+import type { Server, ServerMetrics, NetworkInfo } from '@ownprem/shared';
 
 // Helper: Check if user can manage servers (system admin only for now)
 function canManageServers(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
@@ -31,6 +31,7 @@ interface ServerRow {
   agent_status: string;
   auth_token: string | null;
   metrics: string | null;
+  network_info: string | null;
   last_seen: string | null;
   created_at: string;
   updated_at: string;
@@ -45,6 +46,7 @@ function rowToServer(row: ServerRow): Server {
     agentStatus: row.agent_status as Server['agentStatus'],
     authToken: row.auth_token,
     metrics: row.metrics ? JSON.parse(row.metrics) as ServerMetrics : undefined,
+    networkInfo: row.network_info ? JSON.parse(row.network_info) as NetworkInfo : undefined,
     lastSeen: row.last_seen ? new Date(row.last_seen) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),

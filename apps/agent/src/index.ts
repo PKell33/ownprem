@@ -22,7 +22,7 @@ class Agent {
     const appsDir = process.env.APPS_DIR || '/opt/ownprem/apps';
     const dataDir = process.env.DATA_DIR || undefined; // Let Executor determine default
     this.executor = new Executor(appsDir, dataDir);
-    this.reporter = new Reporter(serverId);
+    this.reporter = new Reporter(serverId, appsDir);
 
     this.connection = new Connection({
       serverId,
@@ -32,6 +32,7 @@ class Agent {
       onConnect: () => this.onConnect(),
       onDisconnect: () => this.onDisconnect(),
       onServerShutdown: () => this.onServerShutdown(),
+      onStatusRequest: () => this.reportStatus(),
     });
   }
 
@@ -146,6 +147,51 @@ class Agent {
           });
           return; // Don't send normal command result for logs
         }
+        case 'mountStorage':
+          if (!cmd.payload?.mountOptions) {
+            throw new Error('Mount options required for mountStorage action');
+          }
+          await this.executor.mountStorage(cmd.payload.mountOptions);
+          break;
+        case 'unmountStorage':
+          if (!cmd.payload?.mountOptions?.mountPoint) {
+            throw new Error('Mount point required for unmountStorage action');
+          }
+          await this.executor.unmountStorage(cmd.payload.mountOptions.mountPoint);
+          break;
+        case 'checkMount': {
+          if (!cmd.payload?.mountOptions?.mountPoint) {
+            throw new Error('Mount point required for checkMount action');
+          }
+          const checkResult = await this.executor.checkMount(cmd.payload.mountOptions.mountPoint);
+          this.connection.sendCommandResult({
+            commandId: cmd.id,
+            status: 'success',
+            duration: Date.now() - start,
+            data: checkResult,
+          });
+          return; // Don't send normal command result
+        }
+        case 'configureKeepalived': {
+          if (!cmd.payload?.keepalivedConfig) {
+            throw new Error('Keepalived config required for configureKeepalived action');
+          }
+          await this.executor.configureKeepalived(
+            cmd.payload.keepalivedConfig,
+            cmd.payload.enabled ?? true
+          );
+          break;
+        }
+        case 'checkKeepalived': {
+          const keepalivedStatus = await this.executor.checkKeepalived();
+          this.connection.sendCommandResult({
+            commandId: cmd.id,
+            status: 'success',
+            duration: Date.now() - start,
+            data: keepalivedStatus,
+          });
+          return; // Don't send normal command result
+        }
         default:
           throw new Error(`Unknown action: ${cmd.action}`);
       }
@@ -182,6 +228,7 @@ class Agent {
         serverId: this.serverId,
         timestamp: new Date(),
         metrics: await this.reporter.getMetrics(),
+        networkInfo: this.reporter.getNetworkInfo(),
         apps: await this.reporter.getAppStatuses(),
       };
 

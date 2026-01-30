@@ -1,7 +1,105 @@
-import { Router } from 'express';
+import { Router, Response, NextFunction } from 'express';
+import { createReadStream } from 'fs';
+import { z } from 'zod';
 import { getDb } from '../../db/index.js';
+import { backupService } from '../../services/backupService.js';
+import { configExportService, ConfigExport } from '../../services/configExportService.js';
+import { systemAppsService } from '../../services/systemAppsService.js';
+import { stateRecoveryService } from '../../jobs/stateRecovery.js';
+import { requireAuth, requireSystemAdmin, AuthenticatedRequest } from '../middleware/auth.js';
+import { csrfProtection } from '../middleware/csrf.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
+import { createError } from '../middleware/error.js';
 
 const router = Router();
+
+// ===============================
+// Validation Schemas
+// ===============================
+
+const backupFilenameParam = z.object({
+  filename: z.string()
+    .min(1)
+    .max(100)
+    .regex(/^[a-zA-Z0-9_.-]+\.sqlite$/, 'Invalid backup filename'),
+});
+
+const pruneBackupsBody = z.object({
+  keepDays: z.number().int().min(1).max(365),
+});
+
+const exportConfigQuery = z.object({
+  includeUsers: z.coerce.boolean().optional().default(true),
+  includeDeployments: z.coerce.boolean().optional().default(true),
+  includeAuditLog: z.coerce.boolean().optional().default(false),
+});
+
+const importConfigBody = z.object({
+  config: z.object({
+    version: z.string(),
+    exportedAt: z.string(),
+    orchestrator: z.object({
+      domain: z.string(),
+      dataPath: z.string(),
+    }).optional(),
+    servers: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      host: z.string().nullable(),
+      isCore: z.boolean(),
+    })).optional(),
+    deployments: z.array(z.object({
+      id: z.string(),
+      appName: z.string(),
+      serverId: z.string(),
+      groupId: z.string().nullable().optional(),
+      config: z.record(z.unknown()),
+      version: z.string(),
+    })).optional(),
+    users: z.array(z.object({
+      id: z.string(),
+      username: z.string(),
+      isSystemAdmin: z.boolean(),
+    })).optional(),
+    groups: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      totpRequired: z.boolean(),
+      members: z.array(z.object({
+        userId: z.string(),
+        role: z.string(),
+      })).optional(),
+    })).optional(),
+    proxyRoutes: z.array(z.object({
+      deploymentId: z.string(),
+      path: z.string(),
+      upstream: z.string(),
+    })).optional(),
+    serviceRoutes: z.array(z.object({
+      serviceId: z.string(),
+      serviceName: z.string(),
+      routeType: z.string(),
+      externalPort: z.number().nullable(),
+      externalPath: z.string().nullable(),
+      internalHost: z.string(),
+      internalPort: z.number(),
+    })).optional(),
+  }),
+  options: z.object({
+    overwrite: z.boolean().optional().default(false),
+    regenerateSecrets: z.boolean().optional().default(true),
+    dryRun: z.boolean().optional().default(false),
+  }).optional().default({}),
+});
+
+const syncStatusParams = z.object({
+  id: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'Invalid deployment ID'),
+});
+
+// ===============================
+// Database Row Types
+// ===============================
 
 interface ServerCountRow {
   total: number;
@@ -21,6 +119,10 @@ interface ProxyRouteRow {
   active: number;
   created_at: string;
 }
+
+// ===============================
+// System Status Routes (Read-only)
+// ===============================
 
 // GET /api/system/status - Overall system status
 router.get('/status', (_req, res) => {
@@ -54,6 +156,19 @@ router.get('/status', (_req, res) => {
   });
 });
 
+// GET /api/system/apps - System apps status
+router.get('/apps', requireAuth, async (_req, res, next) => {
+  try {
+    const status = await systemAppsService.getSystemAppsStatus();
+    res.json({
+      apps: status,
+      allInstalled: status.every(a => a.installed),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/system/proxy-routes - Current proxy configuration
 router.get('/proxy-routes', (_req, res) => {
   const db = getDb();
@@ -77,6 +192,257 @@ router.get('/proxy-routes', (_req, res) => {
   }));
 
   res.json(routes);
+});
+
+// ===============================
+// Backup Routes (System Admin Only)
+// ===============================
+
+// POST /api/system/backup - Create a new backup
+router.post('/backup', requireAuth, requireSystemAdmin, csrfProtection, async (_req, res, next) => {
+  try {
+    const result = await backupService.createBackup();
+    res.status(201).json({
+      success: true,
+      backup: {
+        filename: result.filename,
+        path: result.path,
+        size: result.size,
+        checksum: result.checksum,
+        createdAt: result.timestamp,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/system/backups - List all backups
+router.get('/backups', requireAuth, requireSystemAdmin, (_req, res, next) => {
+  try {
+    const backups = backupService.listBackups();
+    res.json({
+      backups: backups.map(b => ({
+        filename: b.filename,
+        size: b.size,
+        createdAt: b.createdAt,
+      })),
+      backupPath: backupService.getBackupPath(),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/system/backups/:filename - Download a backup file
+router.get('/backups/:filename', requireAuth, requireSystemAdmin, validateParams(backupFilenameParam), (req, res, next) => {
+  try {
+    const { filename } = req.params;
+    const backup = backupService.getBackup(filename);
+
+    if (!backup) {
+      throw createError('Backup not found', 404, 'BACKUP_NOT_FOUND');
+    }
+
+    res.setHeader('Content-Type', 'application/x-sqlite3');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', backup.size);
+
+    const stream = createReadStream(backup.path);
+    stream.pipe(res);
+    stream.on('error', (err) => {
+      next(err);
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/system/backups/:filename - Delete a backup
+router.delete('/backups/:filename', requireAuth, requireSystemAdmin, csrfProtection, validateParams(backupFilenameParam), (req, res, next) => {
+  try {
+    const { filename } = req.params;
+    const deleted = backupService.deleteBackup(filename);
+
+    if (!deleted) {
+      throw createError('Backup not found', 404, 'BACKUP_NOT_FOUND');
+    }
+
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/system/backups/prune - Delete old backups
+router.post('/backups/prune', requireAuth, requireSystemAdmin, csrfProtection, validateBody(pruneBackupsBody), (req, res, next) => {
+  try {
+    const { keepDays } = req.body;
+    const deletedCount = backupService.pruneBackups(keepDays);
+
+    res.json({
+      success: true,
+      deletedCount,
+      message: `Deleted ${deletedCount} backup(s) older than ${keepDays} days`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/system/restore - Restore from backup (DANGEROUS)
+router.post('/restore', requireAuth, requireSystemAdmin, csrfProtection, validateBody(z.object({
+  filename: z.string().min(1).max(100),
+})), async (req, res, next) => {
+  try {
+    const { filename } = req.body;
+    const backup = backupService.getBackup(filename);
+
+    if (!backup) {
+      throw createError('Backup not found', 404, 'BACKUP_NOT_FOUND');
+    }
+
+    const result = await backupService.restoreFromBackup(backup.path);
+
+    res.json({
+      success: result.success,
+      tablesRestored: result.tablesRestored,
+      warnings: result.warnings,
+      message: 'Database restored. Restart the orchestrator for changes to take full effect.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ===============================
+// Config Export/Import Routes (System Admin Only)
+// ===============================
+
+// GET /api/system/export - Export configuration
+router.get('/export', requireAuth, requireSystemAdmin, validateQuery(exportConfigQuery), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    // Query params are validated and coerced by Zod
+    const query = req.query as unknown as {
+      includeUsers: boolean;
+      includeDeployments: boolean;
+      includeAuditLog: boolean;
+    };
+
+    const configData = await configExportService.exportConfig({
+      includeUsers: query.includeUsers,
+      includeDeployments: query.includeDeployments,
+      includeAuditLog: query.includeAuditLog,
+    });
+
+    // Set filename for download
+    const timestamp = new Date().toISOString().replace(/[:-]/g, '').replace('T', '-').slice(0, 15);
+    res.setHeader('Content-Disposition', `attachment; filename="ownprem-config-${timestamp}.json"`);
+    res.json(configData);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/system/import/validate - Validate config before import
+router.post('/import/validate', requireAuth, requireSystemAdmin, validateBody(z.object({
+  config: z.record(z.unknown()),
+})), (req, res, next) => {
+  try {
+    const { config } = req.body;
+    const result = configExportService.validateConfig(config);
+
+    res.json({
+      valid: result.valid,
+      errors: result.errors,
+      warnings: result.warnings,
+      summary: result.summary,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/system/import - Import configuration
+router.post('/import', requireAuth, requireSystemAdmin, csrfProtection, validateBody(importConfigBody), async (req, res, next) => {
+  try {
+    const { config, options } = req.body;
+
+    const result = await configExportService.importConfig(config as ConfigExport, options);
+
+    res.json({
+      success: result.success,
+      imported: result.imported,
+      skipped: result.skipped,
+      warnings: result.warnings,
+      errors: result.errors,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ===============================
+// State Recovery Routes (System Admin Only)
+// ===============================
+
+// GET /api/system/recovery-status - Check for stuck deployments
+router.get('/recovery-status', requireAuth, requireSystemAdmin, (_req, res, next) => {
+  try {
+    const status = stateRecoveryService.getRecoveryStatus();
+
+    res.json({
+      stuckDeployments: status.stuckDeployments,
+      lastRecoveryRun: status.lastRecoveryRun,
+      previousResults: status.recoveryResults,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/system/recover - Trigger manual recovery
+router.post('/recover', requireAuth, requireSystemAdmin, csrfProtection, async (_req, res, next) => {
+  try {
+    const results = await stateRecoveryService.recoverStuckDeployments();
+
+    res.json({
+      success: true,
+      processedCount: results.length,
+      results: results.map(r => ({
+        deploymentId: r.deploymentId,
+        appName: r.appName,
+        serverId: r.serverId,
+        previousState: r.previousState,
+        action: r.action,
+        newState: r.newState,
+        message: r.message,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/system/deployments/:id/sync-status - Force sync single deployment status
+router.post('/deployments/:id/sync-status', requireAuth, requireSystemAdmin, csrfProtection, validateParams(syncStatusParams), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await stateRecoveryService.syncDeploymentState(id);
+
+    res.json({
+      success: result.action !== 'no_action' || result.message === 'Deployment is not in a transient state',
+      deploymentId: result.deploymentId,
+      appName: result.appName,
+      serverId: result.serverId,
+      previousState: result.previousState,
+      action: result.action,
+      newState: result.newState,
+      message: result.message,
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;

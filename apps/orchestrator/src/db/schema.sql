@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS servers (
     agent_status TEXT DEFAULT 'offline',
     auth_token TEXT,
     metrics JSON,
+    network_info JSON,
     last_seen TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -16,6 +17,9 @@ CREATE TABLE IF NOT EXISTS servers (
 CREATE TABLE IF NOT EXISTS app_registry (
     name TEXT PRIMARY KEY,
     manifest JSON NOT NULL,
+    system BOOLEAN DEFAULT FALSE,     -- System app (part of OwnPrem infrastructure)
+    mandatory BOOLEAN DEFAULT FALSE,  -- Cannot be uninstalled from core server
+    singleton BOOLEAN DEFAULT FALSE,  -- Only one instance allowed per cluster
     loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -204,3 +208,103 @@ VALUES ('core', 'core', TRUE, 'offline');
 -- Initialize default group on first run
 INSERT OR IGNORE INTO groups (id, name, description, totp_required)
 VALUES ('default', 'Default', 'Default group for all users and apps', FALSE);
+
+-- Mount definitions (NFS/CIFS share configurations)
+CREATE TABLE IF NOT EXISTS mounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    mount_type TEXT NOT NULL,  -- 'nfs' | 'cifs'
+    source TEXT NOT NULL,       -- e.g., '192.168.1.10:/volume/bitcoin'
+    default_options TEXT,       -- Mount options (e.g., 'vers=4,rw,noatime')
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Server-mount assignments
+CREATE TABLE IF NOT EXISTS server_mounts (
+    id TEXT PRIMARY KEY,
+    server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    mount_id TEXT NOT NULL REFERENCES mounts(id) ON DELETE CASCADE,
+    mount_point TEXT NOT NULL,  -- e.g., '/mnt/bitcoin-data'
+    options TEXT,               -- Override options for this server
+    purpose TEXT,               -- e.g., 'bitcoin-data', 'electrs-data' (for future app linking)
+    auto_mount BOOLEAN DEFAULT TRUE,  -- Auto-mount on agent start
+    status TEXT DEFAULT 'pending',
+    status_message TEXT,
+    last_checked TIMESTAMP,
+    usage_bytes INTEGER,
+    total_bytes INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(server_id, mount_point)
+);
+
+CREATE INDEX IF NOT EXISTS idx_server_mounts_server ON server_mounts(server_id);
+CREATE INDEX IF NOT EXISTS idx_server_mounts_mount ON server_mounts(mount_id);
+
+-- Mount credentials (encrypted, for CIFS)
+CREATE TABLE IF NOT EXISTS mount_credentials (
+    id TEXT PRIMARY KEY,
+    mount_id TEXT NOT NULL REFERENCES mounts(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,  -- Encrypted JSON: {username, password, domain}
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Certificates issued by CA
+CREATE TABLE IF NOT EXISTS certificates (
+    id TEXT PRIMARY KEY,
+    ca_deployment_id TEXT REFERENCES deployments(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,              -- 'server' | 'client' | 'ca'
+    subject_cn TEXT NOT NULL,        -- Common Name
+    subject_sans TEXT,               -- JSON array of Subject Alternative Names
+    cert_pem TEXT NOT NULL,
+    key_encrypted TEXT NOT NULL,     -- Private key encrypted with SECRETS_KEY
+    ca_cert_pem TEXT,                -- CA certificate for chain
+    serial_number TEXT NOT NULL UNIQUE,
+    not_before TIMESTAMP NOT NULL,
+    not_after TIMESTAMP NOT NULL,
+    issued_to_server_id TEXT REFERENCES servers(id) ON DELETE SET NULL,
+    issued_to_deployment_id TEXT REFERENCES deployments(id) ON DELETE SET NULL,
+    revoked_at TIMESTAMP,
+    revocation_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_certificates_ca ON certificates(ca_deployment_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_server ON certificates(issued_to_server_id);
+CREATE INDEX IF NOT EXISTS idx_certificates_expiry ON certificates(not_after);
+CREATE INDEX IF NOT EXISTS idx_certificates_serial ON certificates(serial_number);
+
+-- Caddy HA configuration
+CREATE TABLE IF NOT EXISTS caddy_ha_config (
+    id TEXT PRIMARY KEY,
+    vip_address TEXT NOT NULL,
+    vip_interface TEXT DEFAULT 'eth0',
+    vrrp_router_id INTEGER DEFAULT 51,
+    vrrp_auth_pass_encrypted TEXT,   -- VRRP auth password (encrypted)
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Caddy instances (links deployments to HA config)
+CREATE TABLE IF NOT EXISTS caddy_instances (
+    id TEXT PRIMARY KEY,
+    deployment_id TEXT NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+    ha_config_id TEXT REFERENCES caddy_ha_config(id) ON DELETE SET NULL,
+    vrrp_priority INTEGER DEFAULT 100,
+    is_primary BOOLEAN DEFAULT FALSE,
+    admin_api_url TEXT,
+    last_config_sync TIMESTAMP,
+    last_cert_sync TIMESTAMP,
+    status TEXT DEFAULT 'pending',   -- pending | active | error
+    status_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_caddy_instances_deployment ON caddy_instances(deployment_id);
+CREATE INDEX IF NOT EXISTS idx_caddy_instances_ha ON caddy_instances(ha_config_id);

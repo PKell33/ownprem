@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useQueryClient } from '@tanstack/react-query';
 import { useStore } from '../stores/useStore';
 import { useMetricsStore } from '../stores/useMetricsStore';
 
 export function useWebSocket() {
   const socketRef = useRef<Socket | null>(null);
+  const queryClient = useQueryClient();
   const { updateServerStatus, updateDeploymentStatus, setConnected } = useStore();
   const { addMetrics } = useMetricsStore();
 
@@ -33,6 +35,7 @@ export function useWebSocket() {
       updateServerStatus(data.serverId, {
         agentStatus: 'online',
         metrics: data.metrics,
+        networkInfo: data.networkInfo,
         lastSeen: data.timestamp,
       });
       // Store metrics history for charts
@@ -51,6 +54,8 @@ export function useWebSocket() {
 
     socket.on('deployment:status', (data: DeploymentStatusEvent) => {
       updateDeploymentStatus(data.deploymentId, data.status, data.message);
+      // Invalidate deployments query to trigger a refetch with updated data
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
     });
 
     socket.on('command:result', (data: CommandResultEvent) => {
@@ -58,7 +63,7 @@ export function useWebSocket() {
     });
 
     socketRef.current = socket;
-  }, [updateServerStatus, updateDeploymentStatus, setConnected, addMetrics]);
+  }, [updateServerStatus, updateDeploymentStatus, setConnected, addMetrics, queryClient]);
 
   const disconnect = useCallback(() => {
     if (socketRef.current) {
@@ -87,12 +92,21 @@ interface ServerStatusEvent {
     diskTotal: number;
     loadAverage: [number, number, number];
   };
+  networkInfo?: {
+    ipAddress: string | null;
+    macAddress: string | null;
+  };
 }
 
 interface DeploymentStatusEvent {
   deploymentId: string;
+  appName: string;
+  serverId: string;
   status: string;
+  previousStatus?: string;
+  routeActive?: boolean;
   message?: string;
+  timestamp: string;
 }
 
 interface CommandResultEvent {
