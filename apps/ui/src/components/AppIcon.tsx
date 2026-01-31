@@ -9,7 +9,11 @@ interface AppIconProps {
 // Map of app names to their icon files
 // Apps can provide custom icons in /public/icons/
 const appIcons: Record<string, string> = {
-  // Add custom app icons here as needed
+  'bitcoin-core': '/icons/bitcoin-core.svg',
+  'bitcoin-knots': '/icons/bitcoin-knots.png',
+  'bitcoin-bip110': '/icons/bitcoin-bip110.png',
+  'electrs': '/icons/electrs.png',
+  'mempool': '/icons/mempool.png',
 };
 
 export default function AppIcon({ appName, size = 24, className = '' }: AppIconProps) {
