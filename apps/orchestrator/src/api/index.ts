@@ -103,9 +103,11 @@ export function createApi(): express.Application {
       return req.method !== 'POST';
     },
     // Use IP + username combination to prevent distributed brute force
-    keyGenerator: (req) => {
+    keyGenerator: (req, res) => {
       const username = req.body?.username || 'anonymous';
-      return `${req.ip}:${username}`;
+      // Use the built-in key generator for proper IPv6 handling, then append username
+      const ipKey = rateLimit.ipKeyGenerator(req, res);
+      return `${ipKey}:${username}`;
     },
   });
 
@@ -121,12 +123,13 @@ export function createApi(): express.Application {
         message: 'Account temporarily locked due to too many failed attempts. Try again in 1 hour.',
       },
     },
-    skip: (req) => config.isDevelopment,
+    skip: () => config.isDevelopment,
     // Only count failed attempts (success resets via skipSuccessfulRequests)
     skipSuccessfulRequests: true,
-    keyGenerator: (req) => {
+    keyGenerator: (req, res) => {
       const username = req.body?.username || 'anonymous';
-      return `login:${req.ip}:${username}`;
+      const ipKey = rateLimit.ipKeyGenerator(req, res);
+      return `login:${ipKey}:${username}`;
     },
   });
 

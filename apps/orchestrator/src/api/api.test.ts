@@ -44,11 +44,26 @@ vi.mock('../config.js', () => ({
       accessTokenExpiry: '15m',
       refreshTokenExpiry: '7d',
     },
+    cookies: {
+      secure: false,
+      sameSite: 'strict',
+      httpOnly: true,
+      accessTokenMaxAge: 15 * 60 * 1000,
+      refreshTokenMaxAge: 7 * 24 * 60 * 60 * 1000,
+      refreshTokenPath: '/api/auth',
+    },
     security: {
       bcryptRounds: 4,
       rateLimitWindow: 15 * 60 * 1000,
       rateLimitMax: 100,
       authRateLimitMax: 10,
+      loginLockoutWindow: 60 * 60 * 1000,
+      loginLockoutMax: 5,
+    },
+    csp: {
+      additionalConnectSrc: [],
+      reportOnly: false,
+      reportUri: null,
     },
     cors: { origin: '*' },
     devMode: {
@@ -149,8 +164,11 @@ describe('API Endpoints', () => {
       expect(res.status).toBe(200);
       expect(res.body.user).toBeDefined();
       expect(res.body.user.username).toBe('logintest');
-      expect(res.body.accessToken).toBeDefined();
-      expect(res.body.refreshToken).toBeDefined();
+      // Tokens are now set via httpOnly cookies, not in response body
+      const cookies = res.headers['set-cookie'];
+      expect(cookies).toBeDefined();
+      expect(cookies.some((c: string) => c.startsWith('access_token='))).toBe(true);
+      expect(cookies.some((c: string) => c.startsWith('refresh_token='))).toBe(true);
     });
 
     it('POST /api/auth/login should reject invalid credentials', async () => {
