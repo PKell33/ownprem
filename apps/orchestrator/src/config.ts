@@ -247,6 +247,18 @@ export const config = {
     rateLimitWindow: RATE_LIMIT_WINDOW_MS,
     rateLimitMax: RATE_LIMIT_MAX_REQUESTS,
     authRateLimitMax: AUTH_RATE_LIMIT_MAX,
+    // Login lockout after failed attempts (1 hour window, 5 attempts)
+    loginLockoutWindow: 60 * 60 * 1000,
+    loginLockoutMax: 5,
+  },
+
+  csp: {
+    // Additional CSP connect-src origins (e.g., external APIs)
+    additionalConnectSrc: process.env.CSP_CONNECT_SRC?.split(',').filter(Boolean) || [],
+    // Report-only mode for testing CSP without breaking functionality
+    reportOnly: process.env.CSP_REPORT_ONLY === 'true',
+    // CSP report URI for violation reporting
+    reportUri: process.env.CSP_REPORT_URI || null,
   },
 
   cors: {

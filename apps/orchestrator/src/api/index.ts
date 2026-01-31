@@ -32,10 +32,34 @@ export function createApi(): express.Application {
   // Trust proxy for correct IP detection behind reverse proxy
   app.set('trust proxy', 1);
 
+  // Content Security Policy configuration
+  const cspDirectives: Record<string, string[] | null> = {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'"],
+    styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles for UI components
+    imgSrc: ["'self'", 'data:', 'blob:'], // Allow data URIs for icons/images
+    fontSrc: ["'self'"],
+    connectSrc: ["'self'", 'wss:', 'ws:', ...config.csp.additionalConnectSrc], // WebSocket + custom
+    frameSrc: ["'none'"], // Disallow iframes
+    objectSrc: ["'none'"], // Disallow plugins
+    baseUri: ["'self'"],
+    formAction: ["'self'"],
+    frameAncestors: ["'self'"], // Only allow embedding from same origin
+    upgradeInsecureRequests: config.isDevelopment ? null : [], // Upgrade HTTP to HTTPS in production
+  };
+
+  // Add report URI if configured
+  if (config.csp.reportUri) {
+    cspDirectives.reportUri = [config.csp.reportUri];
+  }
+
   // Security headers with helmet
   app.use(helmet({
-    contentSecurityPolicy: config.isDevelopment ? false : undefined,
-    crossOriginEmbedderPolicy: false, // Allow embedding in iframes for app UIs
+    contentSecurityPolicy: {
+      directives: cspDirectives,
+      reportOnly: config.csp.reportOnly,
+    },
+    crossOriginEmbedderPolicy: false, // Allow loading resources from different origins
   }));
 
   // Request ID middleware for tracing
@@ -59,7 +83,7 @@ export function createApi(): express.Application {
     skip: () => config.isDevelopment, // Skip rate limiting in development
   });
 
-  // Stricter rate limit for auth endpoints
+  // Stricter rate limit for auth endpoints (login, refresh, TOTP)
   const authLimiter = rateLimit({
     windowMs: config.security.rateLimitWindow,
     max: config.security.authRateLimitMax,
@@ -71,7 +95,39 @@ export function createApi(): express.Application {
         message: 'Too many authentication attempts, please try again later',
       },
     },
-    skip: () => config.isDevelopment,
+    skip: (req) => {
+      // Skip rate limiting in development
+      if (config.isDevelopment) return true;
+      // Only rate limit POST requests (login, refresh, totp verify, etc.)
+      // GET requests like /status don't need rate limiting
+      return req.method !== 'POST';
+    },
+    // Use IP + username combination to prevent distributed brute force
+    keyGenerator: (req) => {
+      const username = req.body?.username || 'anonymous';
+      return `${req.ip}:${username}`;
+    },
+  });
+
+  // Very strict rate limit for failed login attempts (progressive lockout)
+  const loginFailureLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour window
+    max: 5, // 5 failed attempts per hour
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      error: {
+        code: 'LOGIN_LOCKED',
+        message: 'Account temporarily locked due to too many failed attempts. Try again in 1 hour.',
+      },
+    },
+    skip: (req) => config.isDevelopment,
+    // Only count failed attempts (success resets via skipSuccessfulRequests)
+    skipSuccessfulRequests: true,
+    keyGenerator: (req) => {
+      const username = req.body?.username || 'anonymous';
+      return `login:${req.ip}:${username}`;
+    },
   });
 
   // CORS configuration
@@ -93,8 +149,11 @@ export function createApi(): express.Application {
   app.use(createRequestLogger());
 
   // Apply rate limiters
-  app.use('/api/auth/login', authLimiter);
-  app.use('/api/auth/setup', authLimiter);
+  // Strict limiter for login endpoint (tracks failed attempts)
+  app.use('/api/auth/login', loginFailureLimiter, authLimiter);
+  // Auth limiter for all auth endpoints (login, setup, refresh, totp)
+  app.use('/api/auth', authLimiter);
+  // General API limiter for all other endpoints
   app.use('/api', apiLimiter);
 
   // Health check endpoints (unauthenticated)
