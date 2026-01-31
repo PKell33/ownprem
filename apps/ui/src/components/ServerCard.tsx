@@ -76,7 +76,7 @@ export default function ServerCard({
   }, {} as Record<string, AppManifest[]>);
 
   // Define category order (system first, then others)
-  const categoryOrder = ['system', 'bitcoin', 'lightning', 'indexer', 'explorer', 'utility', 'other'];
+  const categoryOrder = ['system', 'database', 'web', 'networking', 'monitoring', 'utility', 'other'];
 
   const getAppForDeployment = (appName: string): AppManifest | undefined => {
     return apps.find(a => a.name === appName);

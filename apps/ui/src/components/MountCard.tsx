@@ -244,7 +244,7 @@ export default function MountCard({
               type="text"
               value={assignMountPoint}
               onChange={(e) => setAssignMountPoint(e.target.value)}
-              placeholder="/mnt/bitcoin-data"
+              placeholder="/mnt/app-data"
               className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
               required
               pattern="^/[a-zA-Z0-9/_-]+$"
@@ -271,10 +271,10 @@ export default function MountCard({
               type="text"
               value={assignPurpose}
               onChange={(e) => setAssignPurpose(e.target.value)}
-              placeholder="bitcoin-data"
+              placeholder="app-data"
               className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
             />
-            <p className="text-xs text-muted mt-1">For future app linking (e.g., bitcoin-data, electrs-data)</p>
+            <p className="text-xs text-muted mt-1">For future app linking (e.g., postgres-data, redis-data)</p>
           </div>
 
           <div className="flex gap-3 pt-2">

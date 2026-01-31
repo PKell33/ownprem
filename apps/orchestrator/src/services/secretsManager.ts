@@ -1,6 +1,7 @@
 import { randomBytes, createCipheriv, createDecipheriv, scryptSync } from 'crypto';
 import { getDb } from '../db/index.js';
 import { config } from '../config.js';
+import { secretsLogger } from '../lib/logger.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
@@ -49,9 +50,9 @@ export class SecretsManager {
 
     if (!secretsKey) {
       if (config.isDevelopment) {
-        console.warn('WARNING: No SECRETS_KEY configured. Using ephemeral key for development.');
-        console.warn('         Secrets will NOT persist across restarts!');
-        console.warn('         Set SECRETS_KEY environment variable for persistence.');
+        secretsLogger.warn('No SECRETS_KEY configured. Using ephemeral key for development.');
+        secretsLogger.warn('Secrets will NOT persist across restarts!');
+        secretsLogger.warn('Set SECRETS_KEY environment variable for persistence.');
         // Generate a persistent key for this session
         this.key = randomBytes(32);
       } else {

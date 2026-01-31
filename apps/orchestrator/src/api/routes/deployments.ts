@@ -10,6 +10,7 @@ import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { authService } from '../../services/authService.js';
 import { requestLogs } from '../../websocket/agentHandler.js';
 import { parsePaginationParams, paginateOrReturnAll } from '../../lib/pagination.js';
+import { validateUserConfig } from '../../services/configValidator.js';
 import type { AppManifest } from '@ownprem/shared';
 
 // Infer the validated query type from the schema
@@ -162,6 +163,22 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res, next) => {
 router.post('/', requireAuth, validateBody(schemas.deployments.create), canManageDeployment, async (req, res, next) => {
   try {
     const { serverId, appName, config, version, groupId, serviceBindings } = req.body;
+
+    // Validate user config against manifest schema
+    const db = getDb();
+    const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(appName) as AppRegistryRow | undefined;
+    if (!appRow) {
+      throw createError(`App "${appName}" not found`, 404, 'APP_NOT_FOUND');
+    }
+
+    const manifest = JSON.parse(appRow.manifest) as AppManifest;
+    if (manifest.configSchema && config) {
+      const validation = validateUserConfig(config, manifest.configSchema);
+      if (!validation.valid) {
+        throw createError('Invalid configuration', 400, 'CONFIG_VALIDATION_ERROR', validation.errors);
+      }
+    }
+
     const deployment = await deployer.install(serverId, appName, config || {}, version, groupId, serviceBindings);
     res.status(201).json(deployment);
   } catch (err) {
@@ -245,6 +262,25 @@ router.put('/:id', requireAuth, validateParams(schemas.idParam), canManageDeploy
 
     if (!config || typeof config !== 'object') {
       throw createError('config object is required', 400, 'INVALID_CONFIG');
+    }
+
+    // Get deployment to find app name
+    const existingDeployment = await deployer.getDeployment(req.params.id);
+    if (!existingDeployment) {
+      throw createError('Deployment not found', 404, 'DEPLOYMENT_NOT_FOUND');
+    }
+
+    // Validate user config against manifest schema
+    const db = getDb();
+    const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(existingDeployment.appName) as AppRegistryRow | undefined;
+    if (appRow) {
+      const manifest = JSON.parse(appRow.manifest) as AppManifest;
+      if (manifest.configSchema) {
+        const validation = validateUserConfig(config, manifest.configSchema);
+        if (!validation.valid) {
+          throw createError('Invalid configuration', 400, 'CONFIG_VALIDATION_ERROR', validation.errors);
+        }
+      }
     }
 
     const deployment = await deployer.configure(req.params.id, config);

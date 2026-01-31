@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS service_routes (
     id TEXT PRIMARY KEY,
     service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
     route_type TEXT NOT NULL, -- 'http' or 'tcp'
-    external_path TEXT,       -- For HTTP: /services/bitcoin-rpc
+    external_path TEXT,       -- For HTTP: /services/myapp-api
     external_port INTEGER,    -- For TCP: allocated port (e.g., 50001)
     upstream_host TEXT NOT NULL,
     upstream_port INTEGER NOT NULL,
@@ -214,7 +214,7 @@ CREATE TABLE IF NOT EXISTS mounts (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     mount_type TEXT NOT NULL,  -- 'nfs' | 'cifs'
-    source TEXT NOT NULL,       -- e.g., '192.168.1.10:/volume/bitcoin'
+    source TEXT NOT NULL,       -- e.g., '192.168.1.10:/volume/data'
     default_options TEXT,       -- Mount options (e.g., 'vers=4,rw,noatime')
     description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -226,9 +226,9 @@ CREATE TABLE IF NOT EXISTS server_mounts (
     id TEXT PRIMARY KEY,
     server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     mount_id TEXT NOT NULL REFERENCES mounts(id) ON DELETE CASCADE,
-    mount_point TEXT NOT NULL,  -- e.g., '/mnt/bitcoin-data'
+    mount_point TEXT NOT NULL,  -- e.g., '/mnt/app-data'
     options TEXT,               -- Override options for this server
-    purpose TEXT,               -- e.g., 'bitcoin-data', 'electrs-data' (for future app linking)
+    purpose TEXT,               -- e.g., 'postgres-data', 'redis-data' (for future app linking)
     auto_mount BOOLEAN DEFAULT TRUE,  -- Auto-mount on agent start
     status TEXT DEFAULT 'pending',
     status_message TEXT,

@@ -3,6 +3,7 @@ import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { config } from '../config.js';
+import { dbLogger } from '../lib/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -32,7 +33,7 @@ export function initDb(): Database.Database {
   // Run migrations for schema changes
   runMigrations(db);
 
-  console.log(`Database initialized at ${config.database.path}`);
+  dbLogger.info({ path: config.database.path }, 'Database initialized');
   return db;
 }
 
@@ -46,7 +47,7 @@ function runMigrations(database: Database.Database): void {
   const hasRotatedAt = secretsColumns.some(col => col.name === 'rotated_at');
   if (!hasRotatedAt) {
     database.exec('ALTER TABLE secrets ADD COLUMN rotated_at TIMESTAMP');
-    console.log('Migration: Added rotated_at column to secrets table');
+    dbLogger.info('Migration: Added rotated_at column to secrets table');
   }
 
   // Migration 2: Add name and expires_at columns to agent_tokens table
@@ -54,13 +55,13 @@ function runMigrations(database: Database.Database): void {
   const hasTokenName = agentTokensColumns.some(col => col.name === 'name');
   if (!hasTokenName) {
     database.exec('ALTER TABLE agent_tokens ADD COLUMN name TEXT');
-    console.log('Migration: Added name column to agent_tokens table');
+    dbLogger.info('Migration: Added name column to agent_tokens table');
   }
   const hasExpiresAt = agentTokensColumns.some(col => col.name === 'expires_at');
   if (!hasExpiresAt) {
     database.exec('ALTER TABLE agent_tokens ADD COLUMN expires_at TIMESTAMP');
     database.exec('CREATE INDEX IF NOT EXISTS idx_agent_tokens_expires ON agent_tokens(expires_at)');
-    console.log('Migration: Added expires_at column to agent_tokens table');
+    dbLogger.info('Migration: Added expires_at column to agent_tokens table');
   }
 
   // Migration 3: Add network_info column to servers table
@@ -68,7 +69,7 @@ function runMigrations(database: Database.Database): void {
   const hasNetworkInfo = serversColumns.some(col => col.name === 'network_info');
   if (!hasNetworkInfo) {
     database.exec('ALTER TABLE servers ADD COLUMN network_info JSON');
-    console.log('Migration: Added network_info column to servers table');
+    dbLogger.info('Migration: Added network_info column to servers table');
   }
 
   // Migration 4: Add system and mandatory columns to app_registry table
@@ -76,17 +77,17 @@ function runMigrations(database: Database.Database): void {
   const hasSystemFlag = appRegistryColumns.some(col => col.name === 'system');
   if (!hasSystemFlag) {
     database.exec('ALTER TABLE app_registry ADD COLUMN system BOOLEAN DEFAULT FALSE');
-    console.log('Migration: Added system column to app_registry table');
+    dbLogger.info('Migration: Added system column to app_registry table');
   }
   const hasMandatoryFlag = appRegistryColumns.some(col => col.name === 'mandatory');
   if (!hasMandatoryFlag) {
     database.exec('ALTER TABLE app_registry ADD COLUMN mandatory BOOLEAN DEFAULT FALSE');
-    console.log('Migration: Added mandatory column to app_registry table');
+    dbLogger.info('Migration: Added mandatory column to app_registry table');
   }
   const hasSingletonFlag = appRegistryColumns.some(col => col.name === 'singleton');
   if (!hasSingletonFlag) {
     database.exec('ALTER TABLE app_registry ADD COLUMN singleton BOOLEAN DEFAULT FALSE');
-    console.log('Migration: Added singleton column to app_registry table');
+    dbLogger.info('Migration: Added singleton column to app_registry table');
   }
 }
 

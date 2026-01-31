@@ -426,11 +426,9 @@ export class Executor {
     pathsToTry.push(`/var/log/ownprem/${appName}.log`);
     pathsToTry.push(`${appDir}/logs/${appName}.log`);
 
-    // For bitcoin apps, also check common bitcoin log locations
-    if (appName.startsWith('bitcoin')) {
-      pathsToTry.push(`${appDataDir}/debug.log`);
-      pathsToTry.push(`${appDir}/data/debug.log`);
-    }
+    // Common debug.log locations (used by various apps)
+    pathsToTry.push(`${appDataDir}/debug.log`);
+    pathsToTry.push(`${appDir}/data/debug.log`);
 
     // Try each path
     for (const logPath of pathsToTry) {

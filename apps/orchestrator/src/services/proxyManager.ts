@@ -164,7 +164,7 @@ export class ProxyManager {
     let externalPort: number | undefined;
 
     if (routeType === 'http') {
-      // HTTP services get a path like /services/bitcoin-rpc
+      // HTTP services get a path like /services/myapp-api
       externalPath = `/services/${serviceName}`;
     } else {
       // TCP services get an allocated port

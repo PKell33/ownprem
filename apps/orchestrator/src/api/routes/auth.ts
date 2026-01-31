@@ -1,10 +1,11 @@
-import { Router } from 'express';
+import { Router, NextFunction, Response } from 'express';
 import { authService } from '../../services/authService.js';
 import { csrfService } from '../../services/csrfService.js';
 import { requireAuth, devBypassAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
+import { createError } from '../middleware/error.js';
 import { getDb } from '../../db/index.js';
-import { config } from '../../config.js';
+import { authLogger } from '../../lib/logger.js';
 
 const router = Router();
 
@@ -12,7 +13,7 @@ const router = Router();
  * POST /api/auth/login
  * Authenticate user and return tokens (or require TOTP if enabled/required)
  */
-router.post('/login', validateBody(schemas.auth.login), async (req, res) => {
+router.post('/login', validateBody(schemas.auth.login), async (req, res, next) => {
   try {
     const { username, password } = req.body;
 
@@ -20,13 +21,7 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res) => {
     if (!user) {
       // Log failed attempt
       logAudit(null, 'login_failed', 'user', username, req.ip, { reason: 'invalid_credentials' });
-
-      return res.status(401).json({
-        error: {
-          code: 'INVALID_CREDENTIALS',
-          message: 'Invalid username or password',
-        },
-      });
+      throw createError('Invalid username or password', 401, 'INVALID_CREDENTIALS');
     }
 
     // Check if TOTP is enabled
@@ -81,13 +76,7 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res) => {
       ...tokens,
     });
   } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Login failed',
-      },
-    });
+    next(err);
   }
 });
 
@@ -95,33 +84,21 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res) => {
  * POST /api/auth/login/totp
  * Complete login with TOTP code
  */
-router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req, res) => {
+router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req, res, next) => {
   try {
     const { username, password, totpCode } = req.body;
 
     const user = await authService.validateCredentials(username, password);
     if (!user) {
       logAudit(null, 'login_failed', 'user', username, req.ip, { reason: 'invalid_credentials' });
-
-      return res.status(401).json({
-        error: {
-          code: 'INVALID_CREDENTIALS',
-          message: 'Invalid username or password',
-        },
-      });
+      throw createError('Invalid username or password', 401, 'INVALID_CREDENTIALS');
     }
 
     // Verify TOTP code
     const totpValid = authService.verifyTotpCode(user.id, totpCode);
     if (!totpValid) {
       logAudit(user.id, 'login_failed', 'user', user.id, req.ip, { reason: 'invalid_totp' });
-
-      return res.status(401).json({
-        error: {
-          code: 'INVALID_TOTP',
-          message: 'Invalid verification code',
-        },
-      });
+      throw createError('Invalid verification code', 401, 'INVALID_TOTP');
     }
 
     const tokens = authService.generateTokens(user, {
@@ -141,13 +118,7 @@ router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req,
       ...tokens,
     });
   } catch (err) {
-    console.error('TOTP login error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Login failed',
-      },
-    });
+    next(err);
   }
 });
 
@@ -155,7 +126,7 @@ router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req,
  * POST /api/auth/refresh
  * Refresh access token using refresh token
  */
-router.post('/refresh', validateBody(schemas.auth.refresh), async (req, res) => {
+router.post('/refresh', validateBody(schemas.auth.refresh), async (req, res, next) => {
   try {
     const { refreshToken } = req.body;
 
@@ -164,23 +135,12 @@ router.post('/refresh', validateBody(schemas.auth.refresh), async (req, res) => 
       userAgent: req.headers['user-agent'],
     });
     if (!tokens) {
-      return res.status(401).json({
-        error: {
-          code: 'INVALID_TOKEN',
-          message: 'Invalid or expired refresh token',
-        },
-      });
+      throw createError('Invalid or expired refresh token', 401, 'INVALID_TOKEN');
     }
 
     res.json(tokens);
   } catch (err) {
-    console.error('Token refresh error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Token refresh failed',
-      },
-    });
+    next(err);
   }
 });
 
@@ -188,7 +148,7 @@ router.post('/refresh', validateBody(schemas.auth.refresh), async (req, res) => 
  * POST /api/auth/logout
  * Revoke refresh token
  */
-router.post('/logout', async (req, res) => {
+router.post('/logout', async (req, res, next) => {
   try {
     const { refreshToken } = req.body;
 
@@ -198,13 +158,7 @@ router.post('/logout', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Logout error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Logout failed',
-      },
-    });
+    next(err);
   }
 });
 
@@ -213,83 +167,65 @@ router.post('/logout', async (req, res) => {
  * Get a CSRF token for the current user
  * Uses devBypassAuth to allow development testing
  */
-router.get('/csrf-token', devBypassAuth, (req: AuthenticatedRequest, res) => {
-  if (!req.user) {
-    return res.status(401).json({
-      error: {
-        code: 'UNAUTHORIZED',
-        message: 'Not authenticated',
-      },
-    });
-  }
+router.get('/csrf-token', devBypassAuth, (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user) {
+      throw createError('Not authenticated', 401, 'UNAUTHORIZED');
+    }
 
-  const csrfToken = csrfService.generateToken(req.user.userId);
-  res.json({ csrfToken });
+    const csrfToken = csrfService.generateToken(req.user.userId);
+    res.json({ csrfToken });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
  * GET /api/auth/me
  * Get current user info
  */
-router.get('/me', requireAuth, (req: AuthenticatedRequest, res) => {
-  if (!req.user) {
-    return res.status(401).json({
-      error: {
-        code: 'UNAUTHORIZED',
-        message: 'Not authenticated',
-      },
-    });
-  }
+router.get('/me', requireAuth, (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user) {
+      throw createError('Not authenticated', 401, 'UNAUTHORIZED');
+    }
 
-  const user = authService.getUser(req.user.userId);
-  if (!user) {
-    return res.status(404).json({
-      error: {
-        code: 'USER_NOT_FOUND',
-        message: 'User not found',
-      },
-    });
-  }
+    const user = authService.getUser(req.user.userId);
+    if (!user) {
+      throw createError('User not found', 404, 'USER_NOT_FOUND');
+    }
 
-  res.json({
-    userId: user.id,
-    username: user.username,
-    isSystemAdmin: !!user.is_system_admin,
-    groups: authService.getUserGroups(user.id),
-    totpEnabled: user.totp_enabled,
-    totpRequired: authService.userRequiresTotp(user.id),
-  });
+    res.json({
+      userId: user.id,
+      username: user.username,
+      isSystemAdmin: !!user.is_system_admin,
+      groups: authService.getUserGroups(user.id),
+      totpEnabled: user.totp_enabled,
+      totpRequired: authService.userRequiresTotp(user.id),
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
  * POST /api/auth/change-password
  * Change current user's password
  */
-router.post('/change-password', requireAuth, validateBody(schemas.auth.changePassword), async (req: AuthenticatedRequest, res) => {
+router.post('/change-password', requireAuth, validateBody(schemas.auth.changePassword), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { oldPassword, newPassword } = req.body;
 
     const success = await authService.changePassword(req.user!.userId, oldPassword, newPassword);
     if (!success) {
-      return res.status(401).json({
-        error: {
-          code: 'INVALID_PASSWORD',
-          message: 'Current password is incorrect',
-        },
-      });
+      throw createError('Current password is incorrect', 401, 'INVALID_PASSWORD');
     }
 
     logAudit(req.user!.userId, 'password_changed', 'user', req.user!.userId, req.ip, {});
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Change password error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Password change failed',
-      },
-    });
+    next(err);
   }
 });
 
@@ -297,7 +233,7 @@ router.post('/change-password', requireAuth, validateBody(schemas.auth.changePas
  * GET /api/auth/sessions
  * List all active sessions for current user
  */
-router.get('/sessions', requireAuth, (req: AuthenticatedRequest, res) => {
+router.get('/sessions', requireAuth, (req: AuthenticatedRequest, res, next) => {
   try {
     // Get current token hash from the refresh token in the request body or header
     // Since we don't have the refresh token here, we'll pass undefined
@@ -305,13 +241,7 @@ router.get('/sessions', requireAuth, (req: AuthenticatedRequest, res) => {
     const sessions = authService.getUserSessions(req.user!.userId);
     res.json(sessions);
   } catch (err) {
-    console.error('Get sessions error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to get sessions',
-      },
-    });
+    next(err);
   }
 });
 
@@ -319,7 +249,7 @@ router.get('/sessions', requireAuth, (req: AuthenticatedRequest, res) => {
  * POST /api/auth/sessions/current
  * Get sessions with current session marked (requires refresh token in body)
  */
-router.post('/sessions/current', requireAuth, (req: AuthenticatedRequest, res) => {
+router.post('/sessions/current', requireAuth, (req: AuthenticatedRequest, res, next) => {
   try {
     const { refreshToken } = req.body;
     let currentTokenHash: string | undefined;
@@ -331,13 +261,7 @@ router.post('/sessions/current', requireAuth, (req: AuthenticatedRequest, res) =
     const sessions = authService.getUserSessions(req.user!.userId, currentTokenHash);
     res.json(sessions);
   } catch (err) {
-    console.error('Get sessions error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to get sessions',
-      },
-    });
+    next(err);
   }
 });
 
@@ -345,30 +269,19 @@ router.post('/sessions/current', requireAuth, (req: AuthenticatedRequest, res) =
  * DELETE /api/auth/sessions/:id
  * Revoke a specific session
  */
-router.delete('/sessions/:id', requireAuth, validateParams(schemas.idParam), (req: AuthenticatedRequest, res) => {
+router.delete('/sessions/:id', requireAuth, validateParams(schemas.idParam), (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const revoked = authService.revokeSession(req.user!.userId, id);
 
     if (!revoked) {
-      return res.status(404).json({
-        error: {
-          code: 'SESSION_NOT_FOUND',
-          message: 'Session not found',
-        },
-      });
+      throw createError('Session not found', 404, 'SESSION_NOT_FOUND');
     }
 
     logAudit(req.user!.userId, 'session_revoked', 'session', id, req.ip, {});
     res.json({ success: true });
   } catch (err) {
-    console.error('Revoke session error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to revoke session',
-      },
-    });
+    next(err);
   }
 });
 
@@ -376,7 +289,7 @@ router.delete('/sessions/:id', requireAuth, validateParams(schemas.idParam), (re
  * POST /api/auth/sessions/revoke-others
  * Revoke all sessions except the current one
  */
-router.post('/sessions/revoke-others', requireAuth, validateBody(schemas.auth.sessionRevoke), (req: AuthenticatedRequest, res) => {
+router.post('/sessions/revoke-others', requireAuth, validateBody(schemas.auth.sessionRevoke), (req: AuthenticatedRequest, res, next) => {
   try {
     const { refreshToken } = req.body;
 
@@ -386,13 +299,7 @@ router.post('/sessions/revoke-others', requireAuth, validateBody(schemas.auth.se
     logAudit(req.user!.userId, 'sessions_revoked', 'session', 'all_others', req.ip, { count: revokedCount });
     res.json({ success: true, revokedCount });
   } catch (err) {
-    console.error('Revoke other sessions error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to revoke sessions',
-      },
-    });
+    next(err);
   }
 });
 
@@ -400,20 +307,14 @@ router.post('/sessions/revoke-others', requireAuth, validateBody(schemas.auth.se
  * POST /api/auth/sessions/revoke-all
  * Revoke all sessions including the current one (force logout everywhere)
  */
-router.post('/sessions/revoke-all', requireAuth, async (req: AuthenticatedRequest, res) => {
+router.post('/sessions/revoke-all', requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     await authService.revokeAllUserTokens(req.user!.userId);
 
     logAudit(req.user!.userId, 'sessions_revoked', 'session', 'all', req.ip, {});
     res.json({ success: true, message: 'All sessions revoked. Please log in again.' });
   } catch (err) {
-    console.error('Revoke all sessions error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to revoke sessions',
-      },
-    });
+    next(err);
   }
 });
 
@@ -421,7 +322,7 @@ router.post('/sessions/revoke-all', requireAuth, async (req: AuthenticatedReques
  * GET /api/auth/sessions/active
  * Get the count of active sessions across all users (system admin only)
  */
-router.get('/sessions/active', requireAuth, async (req: AuthenticatedRequest, res) => {
+router.get('/sessions/active', requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     // Import dynamically to avoid circular dependencies
     const { getActiveSessionCount } = await import('../../jobs/sessionCleanup.js');
@@ -436,13 +337,7 @@ router.get('/sessions/active', requireAuth, async (req: AuthenticatedRequest, re
       res.json({ activeSessionCount: sessions.length });
     }
   } catch (err) {
-    console.error('Get active sessions error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to get session count',
-      },
-    });
+    next(err);
   }
 });
 
@@ -454,18 +349,12 @@ router.get('/sessions/active', requireAuth, async (req: AuthenticatedRequest, re
  * GET /api/auth/totp/status
  * Get TOTP status for current user
  */
-router.get('/totp/status', requireAuth, (req: AuthenticatedRequest, res) => {
+router.get('/totp/status', requireAuth, (req: AuthenticatedRequest, res, next) => {
   try {
     const status = authService.getTotpStatus(req.user!.userId);
     res.json(status);
   } catch (err) {
-    console.error('Get TOTP status error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to get TOTP status',
-      },
-    });
+    next(err);
   }
 });
 
@@ -473,7 +362,7 @@ router.get('/totp/status', requireAuth, (req: AuthenticatedRequest, res) => {
  * POST /api/auth/totp/setup
  * Start TOTP setup - generates secret and QR code
  */
-router.post('/totp/setup', requireAuth, async (req: AuthenticatedRequest, res) => {
+router.post('/totp/setup', requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const result = await authService.setupTotp(req.user!.userId);
 
@@ -486,20 +375,9 @@ router.post('/totp/setup', requireAuth, async (req: AuthenticatedRequest, res) =
     });
   } catch (err) {
     if (err instanceof Error && err.message === 'TOTP is already enabled') {
-      return res.status(400).json({
-        error: {
-          code: 'TOTP_ALREADY_ENABLED',
-          message: 'Two-factor authentication is already enabled',
-        },
-      });
+      return next(createError('Two-factor authentication is already enabled', 400, 'TOTP_ALREADY_ENABLED'));
     }
-    console.error('TOTP setup error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to setup TOTP',
-      },
-    });
+    next(err);
   }
 });
 
@@ -507,31 +385,20 @@ router.post('/totp/setup', requireAuth, async (req: AuthenticatedRequest, res) =
  * POST /api/auth/totp/verify
  * Verify TOTP code and enable 2FA
  */
-router.post('/totp/verify', requireAuth, validateBody(schemas.auth.totpVerify), (req: AuthenticatedRequest, res) => {
+router.post('/totp/verify', requireAuth, validateBody(schemas.auth.totpVerify), (req: AuthenticatedRequest, res, next) => {
   try {
     const { code } = req.body;
 
     const success = authService.verifyAndEnableTotp(req.user!.userId, code);
     if (!success) {
-      return res.status(400).json({
-        error: {
-          code: 'INVALID_CODE',
-          message: 'Invalid verification code',
-        },
-      });
+      throw createError('Invalid verification code', 400, 'INVALID_CODE');
     }
 
     logAudit(req.user!.userId, 'totp_enabled', 'user', req.user!.userId, req.ip, {});
 
     res.json({ success: true, message: 'Two-factor authentication enabled' });
   } catch (err) {
-    console.error('TOTP verify error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to verify TOTP',
-      },
-    });
+    next(err);
   }
 });
 
@@ -539,18 +406,13 @@ router.post('/totp/verify', requireAuth, validateBody(schemas.auth.totpVerify), 
  * POST /api/auth/totp/disable
  * Disable TOTP (requires password, blocked if group requires 2FA)
  */
-router.post('/totp/disable', requireAuth, validateBody(schemas.auth.totpDisable), async (req: AuthenticatedRequest, res) => {
+router.post('/totp/disable', requireAuth, validateBody(schemas.auth.totpDisable), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { password } = req.body;
 
     const success = await authService.disableTotp(req.user!.userId, password);
     if (!success) {
-      return res.status(401).json({
-        error: {
-          code: 'INVALID_PASSWORD',
-          message: 'Invalid password',
-        },
-      });
+      throw createError('Invalid password', 401, 'INVALID_PASSWORD');
     }
 
     logAudit(req.user!.userId, 'totp_disabled', 'user', req.user!.userId, req.ip, {});
@@ -558,20 +420,9 @@ router.post('/totp/disable', requireAuth, validateBody(schemas.auth.totpDisable)
     res.json({ success: true, message: 'Two-factor authentication disabled' });
   } catch (err) {
     if (err instanceof Error && err.message.includes('Cannot disable 2FA')) {
-      return res.status(403).json({
-        error: {
-          code: 'TOTP_REQUIRED_BY_GROUP',
-          message: err.message,
-        },
-      });
+      return next(createError(err.message, 403, 'TOTP_REQUIRED_BY_GROUP'));
     }
-    console.error('TOTP disable error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to disable TOTP',
-      },
-    });
+    next(err);
   }
 });
 
@@ -579,29 +430,18 @@ router.post('/totp/disable', requireAuth, validateBody(schemas.auth.totpDisable)
  * POST /api/auth/totp/backup-codes
  * Regenerate backup codes
  */
-router.post('/totp/backup-codes', requireAuth, async (req: AuthenticatedRequest, res) => {
+router.post('/totp/backup-codes', requireAuth, async (req: AuthenticatedRequest, res, next) => {
   try {
     const codes = authService.regenerateBackupCodes(req.user!.userId);
     if (!codes) {
-      return res.status(400).json({
-        error: {
-          code: 'TOTP_NOT_ENABLED',
-          message: 'Two-factor authentication is not enabled',
-        },
-      });
+      throw createError('Two-factor authentication is not enabled', 400, 'TOTP_NOT_ENABLED');
     }
 
     logAudit(req.user!.userId, 'totp_backup_codes_regenerated', 'user', req.user!.userId, req.ip, {});
 
     res.json({ backupCodes: codes });
   } catch (err) {
-    console.error('Regenerate backup codes error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to regenerate backup codes',
-      },
-    });
+    next(err);
   }
 });
 
@@ -609,50 +449,29 @@ router.post('/totp/backup-codes', requireAuth, async (req: AuthenticatedRequest,
  * POST /api/auth/users/:id/totp/reset
  * Admin reset of user's 2FA (system admin only)
  */
-router.post('/users/:id/totp/reset', requireAuth, validateParams(schemas.idParam), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
-  const { id } = req.params;
-
-  // Prevent self-reset via this endpoint (use normal disable for self)
-  if (id === req.user.userId) {
-    return res.status(400).json({
-      error: {
-        code: 'CANNOT_RESET_SELF',
-        message: 'Use the disable endpoint to reset your own 2FA',
-      },
-    });
-  }
-
+router.post('/users/:id/totp/reset', requireAuth, validateParams(schemas.idParam), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
+    const { id } = req.params;
+
+    // Prevent self-reset via this endpoint (use normal disable for self)
+    if (id === req.user.userId) {
+      throw createError('Use the disable endpoint to reset your own 2FA', 400, 'CANNOT_RESET_SELF');
+    }
+
     const success = authService.resetTotpForUser(id);
     if (!success) {
-      return res.status(404).json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
-        },
-      });
+      throw createError('User not found', 404, 'USER_NOT_FOUND');
     }
 
     logAudit(req.user.userId, 'totp_reset_by_admin', 'user', id, req.ip, { targetUserId: id });
 
     res.json({ success: true, message: 'Two-factor authentication has been reset for the user' });
   } catch (err) {
-    console.error('Admin TOTP reset error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to reset 2FA',
-      },
-    });
+    next(err);
   }
 });
 
@@ -660,18 +479,13 @@ router.post('/users/:id/totp/reset', requireAuth, validateParams(schemas.idParam
  * POST /api/auth/setup
  * Initial system admin user setup (only works if no users exist)
  */
-router.post('/setup', validateBody(schemas.auth.setup), async (req, res) => {
+router.post('/setup', validateBody(schemas.auth.setup), async (req, res, next) => {
   try {
     const db = getDb();
     const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
 
     if (userCount.count > 0) {
-      return res.status(403).json({
-        error: {
-          code: 'SETUP_COMPLETE',
-          message: 'Setup already complete. Users exist.',
-        },
-      });
+      throw createError('Setup already complete. Users exist.', 403, 'SETUP_COMPLETE');
     }
 
     const { username, password } = req.body;
@@ -687,13 +501,7 @@ router.post('/setup', validateBody(schemas.auth.setup), async (req, res) => {
       message: 'System admin user created. You can now log in.',
     });
   } catch (err) {
-    console.error('Setup error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Setup failed',
-      },
-    });
+    next(err);
   }
 });
 
@@ -701,35 +509,29 @@ router.post('/setup', validateBody(schemas.auth.setup), async (req, res) => {
  * GET /api/auth/users
  * List all users (system admin only)
  */
-router.get('/users', requireAuth, async (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
+router.get('/users', requireAuth, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
 
-  const users = authService.listUsers();
-  res.json(users);
+    const users = authService.listUsers();
+    res.json(users);
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
  * POST /api/auth/users
  * Create a new user (system admin only)
  */
-router.post('/users', requireAuth, validateBody(schemas.auth.createUser), async (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
+router.post('/users', requireAuth, validateBody(schemas.auth.createUser), async (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
     const { username, password, groupId, role } = req.body;
 
     const userId = await authService.createUser(username, password, false);
@@ -752,20 +554,9 @@ router.post('/users', requireAuth, validateBody(schemas.auth.createUser), async 
     });
   } catch (err) {
     if (err instanceof Error && err.message === 'Username already exists') {
-      return res.status(409).json({
-        error: {
-          code: 'USERNAME_EXISTS',
-          message: 'Username already exists',
-        },
-      });
+      return next(createError('Username already exists', 409, 'USERNAME_EXISTS'));
     }
-    console.error('Create user error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to create user',
-      },
-    });
+    next(err);
   }
 });
 
@@ -773,38 +564,23 @@ router.post('/users', requireAuth, validateBody(schemas.auth.createUser), async 
  * DELETE /api/auth/users/:id
  * Delete a user (system admin only, cannot delete self)
  */
-router.delete('/users/:id', requireAuth, validateParams(schemas.idParam), async (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
-  const { id } = req.params;
-
-  // Prevent self-deletion
-  if (id === req.user.userId) {
-    return res.status(400).json({
-      error: {
-        code: 'CANNOT_DELETE_SELF',
-        message: 'Cannot delete your own account',
-      },
-    });
-  }
-
+router.delete('/users/:id', requireAuth, validateParams(schemas.idParam), async (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
+    const { id } = req.params;
+
+    // Prevent self-deletion
+    if (id === req.user.userId) {
+      throw createError('Cannot delete your own account', 400, 'CANNOT_DELETE_SELF');
+    }
+
     const user = authService.getUser(id);
 
     if (!user) {
-      return res.status(404).json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
-        },
-      });
+      throw createError('User not found', 404, 'USER_NOT_FOUND');
     }
 
     // Revoke all tokens first
@@ -817,13 +593,7 @@ router.delete('/users/:id', requireAuth, validateParams(schemas.idParam), async 
 
     res.status(204).send();
   } catch (err) {
-    console.error('Delete user error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to delete user',
-      },
-    });
+    next(err);
   }
 });
 
@@ -835,35 +605,29 @@ router.delete('/users/:id', requireAuth, validateParams(schemas.idParam), async 
  * GET /api/auth/groups
  * List all groups (system admin only)
  */
-router.get('/groups', requireAuth, (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
+router.get('/groups', requireAuth, (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
 
-  const groups = authService.listGroups();
-  res.json(groups);
+    const groups = authService.listGroups();
+    res.json(groups);
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
  * POST /api/auth/groups
  * Create a new group (system admin only)
  */
-router.post('/groups', requireAuth, validateBody(schemas.groups.create), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
+router.post('/groups', requireAuth, validateBody(schemas.groups.create), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
     const { name, description, totpRequired } = req.body;
 
     const groupId = authService.createGroup(name, description, totpRequired || false);
@@ -874,20 +638,9 @@ router.post('/groups', requireAuth, validateBody(schemas.groups.create), (req: A
     res.status(201).json(group);
   } catch (err) {
     if (err instanceof Error && err.message === 'Group name already exists') {
-      return res.status(409).json({
-        error: {
-          code: 'GROUP_EXISTS',
-          message: 'Group name already exists',
-        },
-      });
+      return next(createError('Group name already exists', 409, 'GROUP_EXISTS'));
     }
-    console.error('Create group error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to create group',
-      },
-    });
+    next(err);
   }
 });
 
@@ -895,58 +648,42 @@ router.post('/groups', requireAuth, validateBody(schemas.groups.create), (req: A
  * GET /api/auth/groups/:id
  * Get a specific group with members (system admin only)
  */
-router.get('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
+router.get('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
+    const { id } = req.params;
+    const group = authService.getGroup(id);
+
+    if (!group) {
+      throw createError('Group not found', 404, 'GROUP_NOT_FOUND');
+    }
+
+    const members = authService.getGroupMembers(id);
+    res.json({ ...group, members });
+  } catch (err) {
+    next(err);
   }
-
-  const { id } = req.params;
-  const group = authService.getGroup(id);
-
-  if (!group) {
-    return res.status(404).json({
-      error: {
-        code: 'GROUP_NOT_FOUND',
-        message: 'Group not found',
-      },
-    });
-  }
-
-  const members = authService.getGroupMembers(id);
-  res.json({ ...group, members });
 });
 
 /**
  * PUT /api/auth/groups/:id
  * Update a group (system admin only)
  */
-router.put('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), validateBody(schemas.groups.update), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
+router.put('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), validateBody(schemas.groups.update), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
     const { id } = req.params;
     const { name, description, totpRequired } = req.body;
 
     const success = authService.updateGroup(id, { name, description, totpRequired });
     if (!success) {
-      return res.status(404).json({
-        error: {
-          code: 'GROUP_NOT_FOUND',
-          message: 'Group not found',
-        },
-      });
+      throw createError('Group not found', 404, 'GROUP_NOT_FOUND');
     }
 
     logAudit(req.user.userId, 'group_updated', 'group', id, req.ip, { name, totpRequired });
@@ -955,20 +692,9 @@ router.put('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), val
     res.json(group);
   } catch (err) {
     if (err instanceof Error && err.message === 'Group name already exists') {
-      return res.status(409).json({
-        error: {
-          code: 'GROUP_EXISTS',
-          message: 'Group name already exists',
-        },
-      });
+      return next(createError('Group name already exists', 409, 'GROUP_EXISTS'));
     }
-    console.error('Update group error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to update group',
-      },
-    });
+    next(err);
   }
 });
 
@@ -976,37 +702,22 @@ router.put('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), val
  * DELETE /api/auth/groups/:id
  * Delete a group (system admin only)
  */
-router.delete('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
+router.delete('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
     const { id } = req.params;
 
     const group = authService.getGroup(id);
     if (!group) {
-      return res.status(404).json({
-        error: {
-          code: 'GROUP_NOT_FOUND',
-          message: 'Group not found',
-        },
-      });
+      throw createError('Group not found', 404, 'GROUP_NOT_FOUND');
     }
 
     const success = authService.deleteGroup(id);
     if (!success) {
-      return res.status(404).json({
-        error: {
-          code: 'GROUP_NOT_FOUND',
-          message: 'Group not found',
-        },
-      });
+      throw createError('Group not found', 404, 'GROUP_NOT_FOUND');
     }
 
     logAudit(req.user.userId, 'group_deleted', 'group', id, req.ip, { name: group.name });
@@ -1014,20 +725,9 @@ router.delete('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), 
     res.status(204).send();
   } catch (err) {
     if (err instanceof Error && err.message === 'Cannot delete the default group') {
-      return res.status(400).json({
-        error: {
-          code: 'CANNOT_DELETE_DEFAULT',
-          message: 'Cannot delete the default group',
-        },
-      });
+      return next(createError('Cannot delete the default group', 400, 'CANNOT_DELETE_DEFAULT'));
     }
-    console.error('Delete group error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to delete group',
-      },
-    });
+    next(err);
   }
 });
 
@@ -1039,38 +739,23 @@ router.delete('/groups/:id', requireAuth, validateParams(schemas.groupIdParam), 
  * POST /api/auth/groups/:id/members
  * Add a user to a group (system admin only)
  */
-router.post('/groups/:id/members', requireAuth, validateParams(schemas.groupIdParam), validateBody(schemas.groups.addMember), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
+router.post('/groups/:id/members', requireAuth, validateParams(schemas.groupIdParam), validateBody(schemas.groups.addMember), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
     const { id: groupId } = req.params;
     const { userId, role } = req.body;
 
     const group = authService.getGroup(groupId);
     if (!group) {
-      return res.status(404).json({
-        error: {
-          code: 'GROUP_NOT_FOUND',
-          message: 'Group not found',
-        },
-      });
+      throw createError('Group not found', 404, 'GROUP_NOT_FOUND');
     }
 
     const user = authService.getUser(userId);
     if (!user) {
-      return res.status(404).json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
-        },
-      });
+      throw createError('User not found', 404, 'USER_NOT_FOUND');
     }
 
     authService.addUserToGroup(userId, groupId, role);
@@ -1079,13 +764,7 @@ router.post('/groups/:id/members', requireAuth, validateParams(schemas.groupIdPa
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Add user to group error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to add user to group',
-      },
-    });
+    next(err);
   }
 });
 
@@ -1093,41 +772,25 @@ router.post('/groups/:id/members', requireAuth, validateParams(schemas.groupIdPa
  * PUT /api/auth/groups/:id/members/:userId
  * Update a user's role in a group (system admin only)
  */
-router.put('/groups/:id/members/:userId', requireAuth, validateParams(schemas.groupMemberParams), validateBody(schemas.groups.updateMember), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
+router.put('/groups/:id/members/:userId', requireAuth, validateParams(schemas.groupMemberParams), validateBody(schemas.groups.updateMember), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
     const { id: groupId, userId } = req.params;
     const { role } = req.body;
 
     const success = authService.updateUserGroupRole(userId, groupId, role);
     if (!success) {
-      return res.status(404).json({
-        error: {
-          code: 'MEMBERSHIP_NOT_FOUND',
-          message: 'User is not a member of this group',
-        },
-      });
+      throw createError('User is not a member of this group', 404, 'MEMBERSHIP_NOT_FOUND');
     }
 
     logAudit(req.user.userId, 'user_role_updated', 'group', groupId, req.ip, { userId, role });
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Update user role error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to update user role',
-      },
-    });
+    next(err);
   }
 });
 
@@ -1135,40 +798,24 @@ router.put('/groups/:id/members/:userId', requireAuth, validateParams(schemas.gr
  * DELETE /api/auth/groups/:id/members/:userId
  * Remove a user from a group (system admin only)
  */
-router.delete('/groups/:id/members/:userId', requireAuth, validateParams(schemas.groupMemberParams), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
+router.delete('/groups/:id/members/:userId', requireAuth, validateParams(schemas.groupMemberParams), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
     const { id: groupId, userId } = req.params;
 
     const success = authService.removeUserFromGroup(userId, groupId);
     if (!success) {
-      return res.status(404).json({
-        error: {
-          code: 'MEMBERSHIP_NOT_FOUND',
-          message: 'User is not a member of this group',
-        },
-      });
+      throw createError('User is not a member of this group', 404, 'MEMBERSHIP_NOT_FOUND');
     }
 
     logAudit(req.user.userId, 'user_removed_from_group', 'group', groupId, req.ip, { userId });
 
     res.status(204).send();
   } catch (err) {
-    console.error('Remove user from group error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to remove user from group',
-      },
-    });
+    next(err);
   }
 });
 
@@ -1176,51 +823,30 @@ router.delete('/groups/:id/members/:userId', requireAuth, validateParams(schemas
  * PUT /api/auth/users/:id/system-admin
  * Set/unset system admin flag (system admin only)
  */
-router.put('/users/:id/system-admin', requireAuth, validateParams(schemas.idParam), validateBody(schemas.auth.setSystemAdmin), (req: AuthenticatedRequest, res) => {
-  if (!req.user?.isSystemAdmin) {
-    return res.status(403).json({
-      error: {
-        code: 'FORBIDDEN',
-        message: 'System admin access required',
-      },
-    });
-  }
-
-  const { id } = req.params;
-  const { isSystemAdmin } = req.body;
-
-  // Prevent removing your own system admin status
-  if (id === req.user.userId && !isSystemAdmin) {
-    return res.status(400).json({
-      error: {
-        code: 'CANNOT_DEMOTE_SELF',
-        message: 'Cannot remove your own system admin status',
-      },
-    });
-  }
-
+router.put('/users/:id/system-admin', requireAuth, validateParams(schemas.idParam), validateBody(schemas.auth.setSystemAdmin), (req: AuthenticatedRequest, res, next) => {
   try {
+    if (!req.user?.isSystemAdmin) {
+      throw createError('System admin access required', 403, 'FORBIDDEN');
+    }
+
+    const { id } = req.params;
+    const { isSystemAdmin } = req.body;
+
+    // Prevent removing your own system admin status
+    if (id === req.user.userId && !isSystemAdmin) {
+      throw createError('Cannot remove your own system admin status', 400, 'CANNOT_DEMOTE_SELF');
+    }
+
     const success = authService.setSystemAdmin(id, !!isSystemAdmin);
     if (!success) {
-      return res.status(404).json({
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
-        },
-      });
+      throw createError('User not found', 404, 'USER_NOT_FOUND');
     }
 
     logAudit(req.user.userId, isSystemAdmin ? 'user_promoted_to_admin' : 'user_demoted_from_admin', 'user', id, req.ip, {});
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Set system admin error:', err);
-    res.status(500).json({
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to update system admin status',
-      },
-    });
+    next(err);
   }
 });
 
@@ -1242,7 +868,7 @@ function logAudit(
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(userId, action, resourceType, resourceId, ipAddress || null, JSON.stringify(details));
   } catch (err) {
-    console.error('Failed to log audit event:', err);
+    authLogger.error({ err }, 'Failed to log audit event');
   }
 }
 

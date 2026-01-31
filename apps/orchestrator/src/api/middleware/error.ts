@@ -6,6 +6,7 @@ const apiLogger = logger.child({ component: 'api-error' });
 export interface ApiError extends Error {
   statusCode?: number;
   code?: string;
+  details?: unknown;
 }
 
 export function errorHandler(
@@ -26,11 +27,17 @@ export function errorHandler(
   const message = err.message || 'Internal server error';
   const code = err.code || 'INTERNAL_ERROR';
 
+  const errorResponse: { code: string; message: string; details?: unknown } = {
+    code,
+    message,
+  };
+
+  if (err.details !== undefined) {
+    errorResponse.details = err.details;
+  }
+
   res.status(statusCode).json({
-    error: {
-      code,
-      message,
-    },
+    error: errorResponse,
   });
 }
 
@@ -43,9 +50,10 @@ export function notFoundHandler(_req: Request, res: Response): void {
   });
 }
 
-export function createError(message: string, statusCode: number, code?: string): ApiError {
+export function createError(message: string, statusCode: number, code?: string, details?: unknown): ApiError {
   const error: ApiError = new Error(message);
   error.statusCode = statusCode;
   error.code = code;
+  error.details = details;
   return error;
 }

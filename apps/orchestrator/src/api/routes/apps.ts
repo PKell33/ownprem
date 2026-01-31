@@ -9,6 +9,7 @@ import { validateParams, schemas } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/auth.js';
 import { AppManifestSchema } from '@ownprem/shared';
 import type { AppManifest } from '@ownprem/shared';
+import { apiLogger } from '../../lib/logger.js';
 
 const router = Router();
 
@@ -44,7 +45,7 @@ function loadAppManifests(): AppManifest[] {
       const validated = AppManifestSchema.parse(parsed);
       apps.push(validated);
     } catch (err) {
-      console.warn(`Failed to load manifest for ${dir}:`, err);
+      apiLogger.warn({ dir, error: err }, 'Failed to load manifest');
     }
   }
 
