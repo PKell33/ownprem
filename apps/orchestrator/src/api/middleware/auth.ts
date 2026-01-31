@@ -8,9 +8,17 @@ export interface AuthenticatedRequest extends Request {
 }
 
 /**
- * Extract token from Authorization header
+ * Extract access token from httpOnly cookie or Authorization header (fallback for backwards compatibility).
+ * Cookie-based auth is preferred for security (httpOnly prevents XSS token theft).
  */
 function extractToken(req: Request): string | null {
+  // Prefer cookie-based auth (secure, httpOnly)
+  const cookieToken = req.cookies?.access_token;
+  if (cookieToken) {
+    return cookieToken;
+  }
+
+  // Fallback to Authorization header for backwards compatibility during transition
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     return null;

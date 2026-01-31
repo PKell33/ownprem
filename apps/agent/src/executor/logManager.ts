@@ -229,6 +229,8 @@ function readLogFile(
  */
 export class LogStreamManager {
   private activeStreams: Map<string, ChildProcess> = new Map();
+  // Track streams that are transitioning from journalctl to file-based fallback
+  private pendingFallback: Map<string, { cancelled: boolean }> = new Map();
   private appsDir: string;
   private dataDir: string;
   private allowedPaths: string[];
@@ -309,10 +311,31 @@ export class LogStreamManager {
       this.activeStreams.set(streamId, proc);
       logLogger.info({ streamId, appName, serviceName }, 'Started log stream');
 
+      // Track this stream for potential fallback transition
+      const fallbackState = { cancelled: false };
+      this.pendingFallback.set(streamId, fallbackState);
+
       // If journalctl exits immediately, the service might not exist
       setTimeout(() => {
+        // Check if fallback was cancelled (stream was stopped during the wait)
+        if (fallbackState.cancelled) {
+          this.pendingFallback.delete(streamId);
+          logLogger.debug({ streamId, appName }, 'Fallback cancelled - stream was stopped');
+          return;
+        }
+        this.pendingFallback.delete(streamId);
+
+        // Check if stream is still ours and journalctl failed
+        const currentProc = this.activeStreams.get(streamId);
+        if (currentProc !== proc) {
+          // Stream was replaced or removed, don't interfere
+          logLogger.debug({ streamId, appName }, 'Fallback skipped - stream changed');
+          return;
+        }
+
         if (!started && proc.exitCode !== null && source === 'auto') {
           // journalctl failed immediately, try file-based streaming
+          logLogger.info({ streamId, appName }, 'Journalctl failed, falling back to file stream');
           this.activeStreams.delete(streamId);
           this.startFileStream(streamId, appName, options, onLine, onError);
         }
@@ -434,6 +457,13 @@ export class LogStreamManager {
    * Stop a log stream.
    */
   stopStream(streamId: string): boolean {
+    // Cancel any pending fallback transition
+    const fallbackState = this.pendingFallback.get(streamId);
+    if (fallbackState) {
+      fallbackState.cancelled = true;
+      this.pendingFallback.delete(streamId);
+    }
+
     const proc = this.activeStreams.get(streamId);
     if (!proc) {
       logLogger.warn({ streamId }, 'Stream not found');
@@ -455,6 +485,12 @@ export class LogStreamManager {
    * Stop all active log streams (for cleanup on shutdown).
    */
   stopAll(): void {
+    // Cancel all pending fallbacks first
+    for (const [, fallbackState] of this.pendingFallback) {
+      fallbackState.cancelled = true;
+    }
+    this.pendingFallback.clear();
+
     for (const [streamId, proc] of this.activeStreams) {
       try {
         proc.kill('SIGTERM');

@@ -1,13 +1,47 @@
-import { Router, NextFunction, Response } from 'express';
-import { authService } from '../../services/authService.js';
+import { Router, NextFunction, Response, CookieOptions } from 'express';
+import { authService, AuthTokens } from '../../services/authService.js';
 import { csrfService } from '../../services/csrfService.js';
 import { requireAuth, devBypassAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { createError } from '../middleware/error.js';
 import { getDb } from '../../db/index.js';
 import { authLogger } from '../../lib/logger.js';
+import { config } from '../../config.js';
 
 const router = Router();
+
+/**
+ * Set authentication cookies (httpOnly for security against XSS).
+ */
+function setAuthCookies(res: Response, tokens: AuthTokens): void {
+  const baseOptions: CookieOptions = {
+    httpOnly: config.cookies.httpOnly,
+    secure: config.cookies.secure,
+    sameSite: config.cookies.sameSite,
+  };
+
+  // Access token cookie - short-lived, accessible to all API routes
+  res.cookie('access_token', tokens.accessToken, {
+    ...baseOptions,
+    maxAge: config.cookies.accessTokenMaxAge,
+    path: '/',
+  });
+
+  // Refresh token cookie - longer-lived, restricted to auth endpoints only
+  res.cookie('refresh_token', tokens.refreshToken, {
+    ...baseOptions,
+    maxAge: config.cookies.refreshTokenMaxAge,
+    path: config.cookies.refreshTokenPath,
+  });
+}
+
+/**
+ * Clear authentication cookies on logout.
+ */
+function clearAuthCookies(res: Response): void {
+  res.clearCookie('access_token', { path: '/' });
+  res.clearCookie('refresh_token', { path: config.cookies.refreshTokenPath });
+}
 
 /**
  * POST /api/auth/login
@@ -44,6 +78,9 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res, next) =
         userAgent: req.headers['user-agent'],
       });
 
+      // Set httpOnly cookies instead of returning tokens in body
+      setAuthCookies(res, tokens);
+
       logAudit(user.id, 'login', 'user', user.id, req.ip, { totpSetupRequired: true });
 
       return res.json({
@@ -54,7 +91,7 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res, next) =
           groups: authService.getUserGroups(user.id),
         },
         totpSetupRequired: true,
-        ...tokens,
+        expiresIn: tokens.expiresIn,
       });
     }
 
@@ -62,6 +99,9 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res, next) =
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });
+
+    // Set httpOnly cookies instead of returning tokens in body
+    setAuthCookies(res, tokens);
 
     // Log successful login
     logAudit(user.id, 'login', 'user', user.id, req.ip, {});
@@ -73,7 +113,7 @@ router.post('/login', validateBody(schemas.auth.login), async (req, res, next) =
         isSystemAdmin: !!user.is_system_admin,
         groups: authService.getUserGroups(user.id),
       },
-      ...tokens,
+      expiresIn: tokens.expiresIn,
     });
   } catch (err) {
     next(err);
@@ -106,6 +146,9 @@ router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req,
       userAgent: req.headers['user-agent'],
     });
 
+    // Set httpOnly cookies instead of returning tokens in body
+    setAuthCookies(res, tokens);
+
     logAudit(user.id, 'login', 'user', user.id, req.ip, { totp: true });
 
     res.json({
@@ -115,7 +158,7 @@ router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req,
         isSystemAdmin: !!user.is_system_admin,
         groups: authService.getUserGroups(user.id),
       },
-      ...tokens,
+      expiresIn: tokens.expiresIn,
     });
   } catch (err) {
     next(err);
@@ -124,21 +167,31 @@ router.post('/login/totp', validateBody(schemas.auth.loginWithTotp), async (req,
 
 /**
  * POST /api/auth/refresh
- * Refresh access token using refresh token
+ * Refresh access token using refresh token from cookie
  */
-router.post('/refresh', validateBody(schemas.auth.refresh), async (req, res, next) => {
+router.post('/refresh', async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    // Get refresh token from cookie (preferred) or body (fallback for backwards compatibility)
+    const refreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
+
+    if (!refreshToken) {
+      throw createError('Refresh token required', 401, 'INVALID_TOKEN');
+    }
 
     const tokens = await authService.refreshAccessToken(refreshToken, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
     });
     if (!tokens) {
+      // Clear invalid cookies
+      clearAuthCookies(res);
       throw createError('Invalid or expired refresh token', 401, 'INVALID_TOKEN');
     }
 
-    res.json(tokens);
+    // Set new httpOnly cookies
+    setAuthCookies(res, tokens);
+
+    res.json({ expiresIn: tokens.expiresIn });
   } catch (err) {
     next(err);
   }
@@ -146,15 +199,19 @@ router.post('/refresh', validateBody(schemas.auth.refresh), async (req, res, nex
 
 /**
  * POST /api/auth/logout
- * Revoke refresh token
+ * Revoke refresh token and clear auth cookies
  */
 router.post('/logout', async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    // Get refresh token from cookie (preferred) or body (fallback for backwards compatibility)
+    const refreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
 
     if (refreshToken) {
       await authService.revokeRefreshToken(refreshToken);
     }
+
+    // Clear httpOnly auth cookies
+    clearAuthCookies(res);
 
     res.json({ success: true });
   } catch (err) {
@@ -247,11 +304,12 @@ router.get('/sessions', requireAuth, (req: AuthenticatedRequest, res, next) => {
 
 /**
  * POST /api/auth/sessions/current
- * Get sessions with current session marked (requires refresh token in body)
+ * Get sessions with current session marked (uses refresh token from cookie or body)
  */
 router.post('/sessions/current', requireAuth, (req: AuthenticatedRequest, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    // Get refresh token from cookie (preferred) or body (fallback)
+    const refreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
     let currentTokenHash: string | undefined;
 
     if (refreshToken) {
@@ -289,9 +347,14 @@ router.delete('/sessions/:id', requireAuth, validateParams(schemas.idParam), (re
  * POST /api/auth/sessions/revoke-others
  * Revoke all sessions except the current one
  */
-router.post('/sessions/revoke-others', requireAuth, validateBody(schemas.auth.sessionRevoke), (req: AuthenticatedRequest, res, next) => {
+router.post('/sessions/revoke-others', requireAuth, (req: AuthenticatedRequest, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    // Get refresh token from cookie (preferred) or body (fallback)
+    const refreshToken = req.cookies?.refresh_token || req.body?.refreshToken;
+
+    if (!refreshToken) {
+      throw createError('Refresh token required to identify current session', 400, 'VALIDATION_ERROR');
+    }
 
     const currentTokenHash = authService.getTokenHashFromRefreshToken(refreshToken);
     const revokedCount = authService.revokeOtherSessions(req.user!.userId, currentTokenHash);

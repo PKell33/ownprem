@@ -138,7 +138,13 @@ export class ProxyManager {
   /**
    * Get the current Caddy integration status.
    */
-  getCaddyStatus(): { consecutiveFailures: number; hasLastGoodConfig: boolean; isCircuitOpen: boolean } {
+  getCaddyStatus(): {
+    consecutiveFailures: number;
+    hasLastGoodConfig: boolean;
+    isCircuitOpen: boolean;
+    circuitOpenedAt: number | null;
+    nextRecoveryAttempt: number | null;
+  } {
     return getCaddyStatusInternal(this.caddyState);
   }
 

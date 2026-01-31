@@ -205,8 +205,11 @@ export default function ServerCard({
                   setConfirmRegenerate(false);
                 }}
                 className="p-1 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                aria-label="Server options menu"
+                aria-expanded={showMenu}
+                aria-haspopup="menu"
               >
-                <MoreVertical size={16} />
+                <MoreVertical size={16} aria-hidden="true" />
               </button>
               {showMenu && (
                 <>

@@ -3,8 +3,8 @@
  * Delegates to specialized modules for specific functionality.
  */
 
-import { spawnSync, spawn, ChildProcess } from 'child_process';
-import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync } from 'fs';
+import { spawnSync, ChildProcess } from 'child_process';
+import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, rmSync } from 'fs';
 import { dirname, resolve } from 'path';
 import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult, LogStreamPayload, LogStreamLine, MountCommandPayload, MountCheckResult } from '@ownprem/shared';
 import { privilegedClient } from './privilegedClient.js';
@@ -15,7 +15,8 @@ import { ALLOWED_PATH_PREFIXES, SCRIPT_TIMEOUT_MS } from './executor/executorTyp
 import { validatePath, validateOwner, validateMode } from './executor/validation.js';
 import { getLogs as getLogsInternal, LogStreamManager } from './executor/logManager.js';
 import { mountStorage as mountStorageInternal, unmountStorage as unmountStorageInternal, checkMount as checkMountInternal } from './executor/mountManager.js';
-import { systemctl as systemctlInternal, configureKeepalived as configureKeepalivedInternal, checkKeepalived as checkKeepalivedInternal, stopAllDevProcesses, killProcessGroup } from './executor/serviceManager.js';
+import { systemctl as systemctlInternal, configureKeepalived as configureKeepalivedInternal, checkKeepalived as checkKeepalivedInternal, stopAllDevProcesses } from './executor/serviceManager.js';
+import { spawnScript, killProcessGroup as killProcessGroupUtil, INSTALL_SCRIPT_LIMITS, DEFAULT_SCRIPT_LIMITS, type ResourceLimits } from './executor/processRunner.js';
 
 const executorLogger = logger.child({ component: 'executor' });
 
@@ -62,135 +63,182 @@ export class Executor {
 
   async install(appName: string, payload: CommandPayload): Promise<void> {
     const appDir = `${this.appsDir}/${appName}`;
-    mkdirSync(appDir, { recursive: true });
 
-    const metadata = payload.metadata;
-    const serviceUser = metadata?.serviceUser;
-    const serviceGroup = metadata?.serviceGroup || serviceUser;
-    const dataDirectories = metadata?.dataDirectories || [];
-    const capabilities = metadata?.capabilities || [];
+    // Track created paths for cleanup on failure
+    const createdPaths: string[] = [];
+    let installSuccess = false;
 
-    // === PRE-INSTALL: Privileged setup ===
-
-    // Create service user if specified
-    if (serviceUser) {
-      executorLogger.info(`Creating service user: ${serviceUser}`);
-      try {
-        const homeDir = dataDirectories[0]?.path || `/var/lib/${serviceUser}`;
-        const result = await privilegedClient.createServiceUser(serviceUser, homeDir);
-        if (result.success) {
-          executorLogger.info(`Service user created: ${serviceUser}`);
-        } else if (!result.error?.includes('already exists')) {
-          executorLogger.warn(`Could not create service user: ${result.error}`);
-        }
-      } catch (err) {
-        executorLogger.warn(`Failed to create service user via helper: ${err}`);
+    try {
+      // Create app directory and track it
+      if (!existsSync(appDir)) {
+        mkdirSync(appDir, { recursive: true });
+        createdPaths.push(appDir);
       }
-    }
 
-    // Create data directories with correct ownership
-    for (const dir of dataDirectories) {
-      executorLogger.info(`Creating data directory: ${dir.path}`);
-      try {
-        const owner = serviceUser && serviceGroup ? `${serviceUser}:${serviceGroup}` : undefined;
-        const result = await privilegedClient.createDirectory(dir.path, owner, '755');
-        if (result.success) {
-          executorLogger.info(`Created directory: ${dir.path}`);
-        } else {
-          executorLogger.warn(`Could not create directory ${dir.path}: ${result.error}`);
-        }
-      } catch (err) {
-        executorLogger.warn(`Failed to create directory via helper: ${err}`);
-      }
-    }
+      const metadata = payload.metadata;
+      const serviceUser = metadata?.serviceUser;
+      const serviceGroup = metadata?.serviceGroup || serviceUser;
+      const dataDirectories = metadata?.dataDirectories || [];
+      const capabilities = metadata?.capabilities || [];
 
-    // Write metadata file for status reporting
-    if (metadata) {
-      const metadataPath = `${appDir}/.ownprem.json`;
-      writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-      executorLogger.info(`Wrote metadata: ${metadataPath}`);
-    }
+      // === PRE-INSTALL: Privileged setup ===
 
-    // Write config files (install script, configs, etc.)
-    if (payload.files) {
-      await this.writeFiles(payload.files);
-    }
-
-    // === RUN INSTALL SCRIPT ===
-    const installScript = `${appDir}/install.sh`;
-    if (existsSync(installScript)) {
-      await this.runScript(installScript, {
-        ...process.env,
-        ...payload.env,
-        APP_NAME: appName,
-        APP_VERSION: payload.version || '',
-        APP_DIR: appDir,
-        SERVICE_USER: serviceUser || '',
-        SERVICE_GROUP: serviceGroup || '',
-        DATA_DIR: dataDirectories[0]?.path || '',
-        CONFIG_DIR: dataDirectories[1]?.path || '',
-      });
-    }
-
-    // === POST-INSTALL: Finalize privileged setup ===
-
-    // Set capabilities on binary if specified
-    for (const cap of capabilities) {
-      const binaryPath = `${appDir}/bin/${appName.replace('ownprem-', '')}`;
-      if (existsSync(binaryPath)) {
-        executorLogger.info(`Setting capability ${cap} on ${binaryPath}`);
+      // Create service user if specified
+      if (serviceUser) {
+        executorLogger.info(`Creating service user: ${serviceUser}`);
         try {
-          const result = await privilegedClient.setCapability(binaryPath, cap);
-          if (!result.success) {
-            executorLogger.warn(`Could not set capability: ${result.error}`);
+          const homeDir = dataDirectories[0]?.path || `/var/lib/${serviceUser}`;
+          const result = await privilegedClient.createServiceUser(serviceUser, homeDir);
+          if (result.success) {
+            executorLogger.info(`Service user created: ${serviceUser}`);
+          } else if (!result.error?.includes('already exists')) {
+            executorLogger.warn(`Could not create service user: ${result.error}`);
           }
         } catch (err) {
-          executorLogger.warn(`Failed to set capability via helper: ${err}`);
+          executorLogger.warn(`Failed to create service user via helper: ${err}`);
         }
       }
+
+      // Create data directories with correct ownership
+      for (const dir of dataDirectories) {
+        executorLogger.info(`Creating data directory: ${dir.path}`);
+        try {
+          const owner = serviceUser && serviceGroup ? `${serviceUser}:${serviceGroup}` : undefined;
+          const result = await privilegedClient.createDirectory(dir.path, owner, '755');
+          if (result.success) {
+            executorLogger.info(`Created directory: ${dir.path}`);
+            // Track created directories for potential cleanup
+            createdPaths.push(dir.path);
+          } else {
+            executorLogger.warn(`Could not create directory ${dir.path}: ${result.error}`);
+          }
+        } catch (err) {
+          executorLogger.warn(`Failed to create directory via helper: ${err}`);
+        }
+      }
+
+      // Write metadata file for status reporting
+      if (metadata) {
+        const metadataPath = `${appDir}/.ownprem.json`;
+        writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+        executorLogger.info(`Wrote metadata: ${metadataPath}`);
+      }
+
+      // Write config files (install script, configs, etc.)
+      if (payload.files) {
+        await this.writeFiles(payload.files);
+      }
+
+      // === RUN INSTALL SCRIPT ===
+      const installScript = `${appDir}/install.sh`;
+      if (existsSync(installScript)) {
+        // Use more permissive limits for install scripts (compiling, downloading, etc.)
+        await this.runScript(installScript, {
+          ...process.env,
+          ...payload.env,
+          APP_NAME: appName,
+          APP_VERSION: payload.version || '',
+          APP_DIR: appDir,
+          SERVICE_USER: serviceUser || '',
+          SERVICE_GROUP: serviceGroup || '',
+          DATA_DIR: dataDirectories[0]?.path || '',
+          CONFIG_DIR: dataDirectories[1]?.path || '',
+        }, SCRIPT_TIMEOUT_MS, INSTALL_SCRIPT_LIMITS);
+      }
+
+      // === POST-INSTALL: Finalize privileged setup ===
+
+      // Set capabilities on binary if specified
+      for (const cap of capabilities) {
+        const binaryPath = `${appDir}/bin/${appName.replace('ownprem-', '')}`;
+        if (existsSync(binaryPath)) {
+          executorLogger.info(`Setting capability ${cap} on ${binaryPath}`);
+          try {
+            const result = await privilegedClient.setCapability(binaryPath, cap);
+            if (!result.success) {
+              executorLogger.warn(`Could not set capability: ${result.error}`);
+            }
+          } catch (err) {
+            executorLogger.warn(`Failed to set capability via helper: ${err}`);
+          }
+        }
+      }
+
+      // Copy systemd service template if it exists
+      const serviceName = metadata?.serviceName || appName;
+      const serviceTemplate = `${appDir}/templates/${serviceName}.service`;
+      if (existsSync(serviceTemplate)) {
+        executorLogger.info(`Installing systemd service: ${serviceName}`);
+        try {
+          // Read template and substitute variables
+          let serviceContent = readFileSync(serviceTemplate, 'utf-8');
+          serviceContent = serviceContent
+            .replace(/\$\{APP_DIR\}/g, appDir)
+            .replace(/\$\{DATA_DIR\}/g, dataDirectories[0]?.path || '')
+            .replace(/\$\{CONFIG_DIR\}/g, dataDirectories[1]?.path || '')
+            .replace(/\$\{SERVICE_USER\}/g, serviceUser || 'root')
+            .replace(/\$\{SERVICE_GROUP\}/g, serviceGroup || 'root');
+
+          const servicePath = `/etc/systemd/system/${serviceName}.service`;
+          const result = await privilegedClient.writeFile(servicePath, serviceContent);
+          if (result.success) {
+            executorLogger.info(`Wrote systemd service: ${servicePath}`);
+
+            // Register the service with privileged helper before systemctl operations
+            const registerResult = await privilegedClient.registerService(serviceName);
+            if (!registerResult.success) {
+              executorLogger.warn(`Could not register service: ${registerResult.error}`);
+            } else {
+              executorLogger.info(`Registered service: ${serviceName}`);
+            }
+
+            // Reload systemd
+            await privilegedClient.systemctl('daemon-reload');
+
+            // Enable service
+            const enableResult = await privilegedClient.systemctl('enable', serviceName);
+            if (enableResult.success) {
+              executorLogger.info(`Enabled service: ${serviceName}`);
+            }
+          } else {
+            executorLogger.warn(`Could not write systemd service: ${result.error}`);
+          }
+        } catch (err) {
+          executorLogger.warn(`Failed to install systemd service: ${err}`);
+        }
+      }
+
+      // Mark installation as successful
+      installSuccess = true;
+    } finally {
+      // Clean up created paths if installation failed
+      if (!installSuccess) {
+        await this.cleanupFailedInstall(appName, createdPaths);
+      }
+    }
+  }
+
+  /**
+   * Clean up created paths after a failed installation.
+   * Removes paths in reverse order (deepest first).
+   */
+  private async cleanupFailedInstall(appName: string, createdPaths: string[]): Promise<void> {
+    if (createdPaths.length === 0) {
+      return;
     }
 
-    // Copy systemd service template if it exists
-    const serviceName = metadata?.serviceName || appName;
-    const serviceTemplate = `${appDir}/templates/${serviceName}.service`;
-    if (existsSync(serviceTemplate)) {
-      executorLogger.info(`Installing systemd service: ${serviceName}`);
+    executorLogger.warn({ appName, paths: createdPaths }, 'Cleaning up failed installation');
+
+    // Remove in reverse order (deepest paths first)
+    for (const path of createdPaths.reverse()) {
       try {
-        // Read template and substitute variables
-        let serviceContent = readFileSync(serviceTemplate, 'utf-8');
-        serviceContent = serviceContent
-          .replace(/\$\{APP_DIR\}/g, appDir)
-          .replace(/\$\{DATA_DIR\}/g, dataDirectories[0]?.path || '')
-          .replace(/\$\{CONFIG_DIR\}/g, dataDirectories[1]?.path || '')
-          .replace(/\$\{SERVICE_USER\}/g, serviceUser || 'root')
-          .replace(/\$\{SERVICE_GROUP\}/g, serviceGroup || 'root');
-
-        const servicePath = `/etc/systemd/system/${serviceName}.service`;
-        const result = await privilegedClient.writeFile(servicePath, serviceContent);
-        if (result.success) {
-          executorLogger.info(`Wrote systemd service: ${servicePath}`);
-
-          // Register the service with privileged helper before systemctl operations
-          const registerResult = await privilegedClient.registerService(serviceName);
-          if (!registerResult.success) {
-            executorLogger.warn(`Could not register service: ${registerResult.error}`);
-          } else {
-            executorLogger.info(`Registered service: ${serviceName}`);
-          }
-
-          // Reload systemd
-          await privilegedClient.systemctl('daemon-reload');
-
-          // Enable service
-          const enableResult = await privilegedClient.systemctl('enable', serviceName);
-          if (enableResult.success) {
-            executorLogger.info(`Enabled service: ${serviceName}`);
-          }
-        } else {
-          executorLogger.warn(`Could not write systemd service: ${result.error}`);
+        if (existsSync(path)) {
+          rmSync(path, { recursive: true, force: true });
+          executorLogger.info(`Cleaned up: ${path}`);
         }
-      } catch (err) {
-        executorLogger.warn(`Failed to install systemd service: ${err}`);
+      } catch (cleanupError) {
+        // Log but don't throw - best effort cleanup
+        executorLogger.error({ path, error: cleanupError }, 'Failed to cleanup path during install failure');
       }
     }
   }
@@ -473,7 +521,8 @@ export class Executor {
   private async runScript(
     script: string,
     env: Record<string, string | undefined>,
-    timeoutMs: number = SCRIPT_TIMEOUT_MS
+    timeoutMs: number = SCRIPT_TIMEOUT_MS,
+    limits: ResourceLimits = DEFAULT_SCRIPT_LIMITS
   ): Promise<void> {
     // Validate script path to prevent path traversal
     const safeScript = this.validatePath(script);
@@ -484,11 +533,19 @@ export class Executor {
     }
 
     return new Promise((resolve, reject) => {
-      executorLogger.info({ script: safeScript, timeoutMs }, 'Running script');
+      executorLogger.info({ script: safeScript, timeoutMs, limits }, 'Running script with resource limits');
 
-      const proc = spawn('bash', [safeScript], {
-        stdio: 'inherit',
-        env: env as NodeJS.ProcessEnv,
+      // Spawn with resource limits and detached process group
+      const proc = spawnScript(safeScript, env, limits, true);
+
+      const pgid = proc.pid!;
+
+      // Capture stdout/stderr for logging instead of inheriting
+      proc.stdout?.on('data', (data: Buffer) => {
+        executorLogger.info({ script: safeScript }, data.toString().trim());
+      });
+      proc.stderr?.on('data', (data: Buffer) => {
+        executorLogger.error({ script: safeScript }, data.toString().trim());
       });
 
       let timedOut = false;
@@ -498,18 +555,12 @@ export class Executor {
       if (timeoutMs > 0) {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
-          executorLogger.error({ script: safeScript, timeoutMs }, 'Script execution timed out, killing process');
+          executorLogger.error({ script: safeScript, timeoutMs, pgid }, 'Script execution timed out, killing process group');
 
-          // Try graceful shutdown first
-          proc.kill('SIGTERM');
-
-          // Force kill after 5 seconds if still running
-          setTimeout(() => {
-            if (!proc.killed) {
-              executorLogger.warn({ script: safeScript }, 'Script did not respond to SIGTERM, sending SIGKILL');
-              proc.kill('SIGKILL');
-            }
-          }, 5000);
+          // Kill entire process group with escalating signals
+          killProcessGroupUtil(pgid, 5000).catch(err => {
+            executorLogger.error({ script: safeScript, pgid, err }, 'Error killing process group');
+          });
         }, timeoutMs);
       }
 
@@ -542,14 +593,14 @@ export class Executor {
   // Cleanup
   // ===============================
 
-  stopAllDevProcesses(): void {
-    stopAllDevProcesses(this.runningProcesses);
+  async stopAllDevProcesses(): Promise<void> {
+    await stopAllDevProcesses(this.runningProcesses);
   }
 
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     executorLogger.info('Cleaning up executor resources');
     this.stopAllLogStreams();
-    this.stopAllDevProcesses();
+    await this.stopAllDevProcesses();
   }
 
   getRunningProcessCount(): number {

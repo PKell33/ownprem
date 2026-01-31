@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { randomUUID } from 'crypto';
 import authRouter from './routes/auth.js';
@@ -84,6 +85,9 @@ export function createApi(): express.Application {
 
   // Body parsing
   app.use(express.json({ limit: '1mb' }));
+
+  // Cookie parsing for httpOnly cookie authentication
+  app.use(cookieParser());
 
   // Request logging
   app.use(createRequestLogger());

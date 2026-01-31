@@ -172,8 +172,9 @@ export default function LogViewerModal({
               <button
                 onClick={handleClearFilter}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                aria-label="Clear filter"
               >
-                <X size={16} />
+                <X size={16} aria-hidden="true" />
               </button>
             )}
           </div>
@@ -191,8 +192,9 @@ export default function LogViewerModal({
             disabled={loading}
             className="p-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
             title="Refresh logs"
+            aria-label="Refresh logs"
           >
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
           </button>
 
           {/* Stream toggle */}

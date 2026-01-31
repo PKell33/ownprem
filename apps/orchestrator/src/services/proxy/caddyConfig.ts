@@ -13,9 +13,15 @@ interface CaddyManagerState {
   lastConfigHash: string | null;
   lastGoodConfig: object | null;
   consecutiveFailures: number;
+  /** Timestamp when circuit was opened (for auto-recovery) */
+  circuitOpenedAt: number | null;
+  /** Timer for auto-recovery */
+  recoveryTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const MAX_CONSECUTIVE_FAILURES = 3;
+/** How long to wait before attempting auto-recovery (5 minutes) */
+const CIRCUIT_RECOVERY_DELAY_MS = 5 * 60 * 1000;
 
 /**
  * Create initial Caddy manager state.
@@ -25,6 +31,8 @@ export function createCaddyState(): CaddyManagerState {
     lastConfigHash: null,
     lastGoodConfig: null,
     consecutiveFailures: 0,
+    circuitOpenedAt: null,
+    recoveryTimer: null,
   };
 }
 
@@ -35,15 +43,21 @@ export async function isStepCaAvailable(): Promise<boolean> {
   try {
     // Check if the root CA cert exists (indicates step-ca is installed)
     const { access } = await import('fs/promises');
-    await access('/etc/step-ca/root_ca.crt');
+    await access(config.stepCa.rootCertPath);
+
+    // Parse the configured ACME URL to get connection details
+    const acmeUrl = new URL(config.stepCa.acmeUrl);
+    const hostname = acmeUrl.hostname;
+    const port = parseInt(acmeUrl.port, 10) || (acmeUrl.protocol === 'https:' ? 443 : 80);
+    const path = acmeUrl.pathname;
 
     // Try to reach the ACME directory endpoint using https module for self-signed cert support
     const https = await import('https');
     const result = await new Promise<boolean>((resolve) => {
       const req = https.request({
-        hostname: '127.0.0.1',
-        port: 8443,
-        path: '/acme/acme/directory',
+        hostname,
+        port,
+        path,
         method: 'GET',
         rejectUnauthorized: false,
         timeout: 2000,
@@ -61,7 +75,7 @@ export async function isStepCaAvailable(): Promise<boolean> {
     });
 
     if (result) {
-      logger.debug('step-ca ACME endpoint is accessible');
+      logger.debug({ acmeUrl: config.stepCa.acmeUrl }, 'step-ca ACME endpoint is accessible');
       return true;
     }
   } catch {
@@ -79,9 +93,10 @@ export async function generateTlsConfig(domain: string): Promise<object> {
   const stepCaAvailable = await isStepCaAvailable();
 
   if (stepCaAvailable) {
-    const acmeDirectoryUrl = 'https://ca.ownprem.local:8443/acme/acme/directory';
+    const acmeDirectoryUrl = config.stepCa.acmeUrl;
+    const rootCertPath = config.stepCa.rootCertPath;
 
-    logger.info({ acmeDirectoryUrl }, 'Using step-ca ACME issuer for TLS');
+    logger.info({ acmeDirectoryUrl, rootCertPath }, 'Using step-ca ACME issuer for TLS');
 
     return {
       tls: {
@@ -91,7 +106,7 @@ export async function generateTlsConfig(domain: string): Promise<object> {
             issuers: [{
               module: 'acme',
               ca: acmeDirectoryUrl,
-              trusted_roots_pem_files: ['/etc/step-ca/root_ca.crt'],
+              trusted_roots_pem_files: [rootCertPath],
             }],
           }],
         },
@@ -372,6 +387,58 @@ export async function pushConfigToCaddy(
 
     logger.error({ err, consecutiveFailures: state.consecutiveFailures },
       'Failed to update Caddy config after retries');
+
+    // Start auto-recovery if circuit just opened
+    if (state.consecutiveFailures === MAX_CONSECUTIVE_FAILURES) {
+      scheduleAutoRecovery(state, caddyAdminUrl);
+    }
+
+    return false;
+  }
+}
+
+/**
+ * Schedule automatic recovery attempt after circuit opens.
+ */
+function scheduleAutoRecovery(state: CaddyManagerState, caddyAdminUrl: string): void {
+  // Clear any existing recovery timer
+  if (state.recoveryTimer) {
+    clearTimeout(state.recoveryTimer);
+  }
+
+  state.circuitOpenedAt = Date.now();
+  logger.info({ recoveryDelayMs: CIRCUIT_RECOVERY_DELAY_MS },
+    'Circuit breaker opened - scheduling auto-recovery');
+
+  state.recoveryTimer = setTimeout(async () => {
+    logger.info('Attempting auto-recovery of Caddy circuit breaker');
+    state.recoveryTimer = null;
+
+    // Check if Caddy is now accessible
+    const isAccessible = await checkCaddyHealth(caddyAdminUrl);
+    if (isAccessible) {
+      logger.info('Caddy is accessible - resetting circuit breaker');
+      state.consecutiveFailures = 0;
+      state.circuitOpenedAt = null;
+      state.lastConfigHash = null; // Force config push on next update
+    } else {
+      logger.warn('Caddy still not accessible - scheduling another recovery attempt');
+      scheduleAutoRecovery(state, caddyAdminUrl);
+    }
+  }, CIRCUIT_RECOVERY_DELAY_MS);
+}
+
+/**
+ * Check if Caddy Admin API is accessible.
+ */
+async function checkCaddyHealth(caddyAdminUrl: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${caddyAdminUrl}/config/`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return response.ok;
+  } catch {
     return false;
   }
 }
@@ -380,7 +447,13 @@ export async function pushConfigToCaddy(
  * Reset Caddy state to allow retrying after failures.
  */
 export function resetCaddyState(state: CaddyManagerState): void {
+  // Clear recovery timer
+  if (state.recoveryTimer) {
+    clearTimeout(state.recoveryTimer);
+    state.recoveryTimer = null;
+  }
   state.consecutiveFailures = 0;
+  state.circuitOpenedAt = null;
   state.lastConfigHash = null;
   logger.info('Caddy state reset - next updateAndReload will apply config');
 }
@@ -392,11 +465,18 @@ export function getCaddyStatus(state: CaddyManagerState): {
   consecutiveFailures: number;
   hasLastGoodConfig: boolean;
   isCircuitOpen: boolean;
+  circuitOpenedAt: number | null;
+  nextRecoveryAttempt: number | null;
 } {
+  const isCircuitOpen = state.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES;
   return {
     consecutiveFailures: state.consecutiveFailures,
     hasLastGoodConfig: state.lastGoodConfig !== null,
-    isCircuitOpen: state.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES,
+    isCircuitOpen,
+    circuitOpenedAt: state.circuitOpenedAt,
+    nextRecoveryAttempt: state.circuitOpenedAt
+      ? state.circuitOpenedAt + CIRCUIT_RECOVERY_DELAY_MS
+      : null,
   };
 }
 

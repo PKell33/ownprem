@@ -64,8 +64,9 @@ export default function Layout() {
           <button
             onClick={() => setSidebarOpen(false)}
             className="md:hidden p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+            aria-label="Close sidebar"
           >
-            <X size={20} />
+            <X size={20} aria-hidden="true" />
           </button>
         </div>
 
@@ -166,8 +167,10 @@ export default function Layout() {
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-lg transition-colors
                 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Open menu"
+              aria-expanded={sidebarOpen}
             >
-              <Menu size={24} />
+              <Menu size={24} aria-hidden="true" />
             </button>
             <h1 className="text-lg font-extrabold tracking-tight">
               <span>&#x232C;</span><span style={{ color: '#7aa2f7' }}>w</span><span>nPrem</span>
@@ -176,8 +179,9 @@ export default function Layout() {
               onClick={toggleTheme}
               className="p-2 rounded-lg transition-colors
                 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             >
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+              {theme === 'dark' ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
             </button>
           </div>
         </div>

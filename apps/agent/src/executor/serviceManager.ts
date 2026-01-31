@@ -10,15 +10,48 @@ import logger from '../lib/logger.js';
 
 const serviceLogger = logger.child({ component: 'serviceManager' });
 
+// Mutex to prevent concurrent kill operations on same process
+const killLocks = new Map<number, Promise<void>>();
+
 /**
  * Kill a process group with escalating signals.
+ * Returns a promise that resolves when the process is confirmed dead.
  */
-export function killProcessGroup(pid: number, service: string): void {
+export async function killProcessGroup(pid: number, service: string): Promise<void> {
+  // Wait for any in-flight kill operation on this PID
+  const existingLock = killLocks.get(pid);
+  if (existingLock) {
+    await existingLock;
+    return;
+  }
+
+  const killPromise = killProcessGroupInternal(pid, service);
+  killLocks.set(pid, killPromise);
+
+  try {
+    await killPromise;
+  } finally {
+    killLocks.delete(pid);
+  }
+}
+
+/**
+ * Internal implementation of process group killing with confirmation.
+ */
+async function killProcessGroupInternal(pid: number, service: string): Promise<void> {
+  // Check if process is already dead
+  try {
+    process.kill(pid, 0);
+  } catch {
+    serviceLogger.debug({ service, pid }, 'Process already dead');
+    return;
+  }
+
   // Try to kill the process group (negative PID)
   try {
     process.kill(-pid, 'SIGTERM');
     serviceLogger.debug({ service, pid }, 'Sent SIGTERM to process group');
-  } catch (err) {
+  } catch {
     // Process group might not exist, try individual process
     try {
       process.kill(pid, 'SIGTERM');
@@ -29,26 +62,47 @@ export function killProcessGroup(pid: number, service: string): void {
     }
   }
 
-  // Give process time to clean up, then force kill if needed
-  setTimeout(() => {
+  // Wait for graceful shutdown with confirmation loop
+  const gracefulTimeoutMs = 3000;
+  const checkIntervalMs = 100;
+  const maxChecks = gracefulTimeoutMs / checkIntervalMs;
+
+  for (let i = 0; i < maxChecks; i++) {
+    await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
     try {
-      // Check if still alive
       process.kill(pid, 0);
-      // Still alive, force kill
-      try {
-        process.kill(-pid, 'SIGKILL');
-      } catch {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // Already dead
-        }
-      }
-      serviceLogger.warn({ service, pid }, 'Process did not respond to SIGTERM, sent SIGKILL');
+      // Still alive, continue waiting
     } catch {
       // Process is dead, good
+      serviceLogger.debug({ service, pid }, 'Process terminated gracefully');
+      return;
     }
-  }, 3000);
+  }
+
+  // Process didn't respond to SIGTERM, force kill
+  serviceLogger.warn({ service, pid }, 'Process did not respond to SIGTERM, sending SIGKILL');
+
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already dead
+      return;
+    }
+  }
+
+  // Wait for SIGKILL to take effect (should be immediate)
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Verify process is dead
+  try {
+    process.kill(pid, 0);
+    serviceLogger.error({ service, pid }, 'Process survived SIGKILL - may be in uninterruptible state');
+  } catch {
+    serviceLogger.debug({ service, pid }, 'Process killed with SIGKILL');
+  }
 }
 
 function runSystemctlDirect(action: string, service: string): Promise<void> {
@@ -205,7 +259,7 @@ export async function systemctl(
     // Kill the entire process group to ensure all children are terminated
     const proc = state.runningProcesses.get(service);
     if (proc && proc.pid) {
-      killProcessGroup(proc.pid, service);
+      await killProcessGroup(proc.pid, service);
       state.runningProcesses.delete(service);
     }
     serviceLogger.info(`Stopped ${service} in dev mode`);
@@ -350,13 +404,17 @@ export async function checkKeepalived(): Promise<{ installed: boolean; running: 
 
 /**
  * Stop all running dev mode processes.
+ * Returns a promise that resolves when all processes are stopped.
  */
-export function stopAllDevProcesses(runningProcesses: Map<string, ChildProcess>): void {
+export async function stopAllDevProcesses(runningProcesses: Map<string, ChildProcess>): Promise<void> {
+  const killPromises: Promise<void>[] = [];
   for (const [service, proc] of runningProcesses) {
     if (proc.pid) {
       serviceLogger.info({ service, pid: proc.pid }, 'Stopping dev mode process during cleanup');
-      killProcessGroup(proc.pid, service);
+      killPromises.push(killProcessGroup(proc.pid, service));
     }
   }
+  // Wait for all processes to be killed in parallel
+  await Promise.all(killPromises);
   runningProcesses.clear();
 }

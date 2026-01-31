@@ -39,22 +39,22 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
-    message: string
+    message: string,
+    public requestId?: string
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-function getAuthHeaders(): HeadersInit {
-  const { accessToken } = useAuthStore.getState();
-  const headers: HeadersInit = {
+/**
+ * Get headers for API requests.
+ * No longer includes Authorization header - tokens are sent via httpOnly cookies.
+ */
+function getRequestHeaders(): HeadersInit {
+  return {
     'Content-Type': 'application/json',
   };
-  if (accessToken) {
-    headers['Authorization'] = `Bearer ${accessToken}`;
-  }
-  return headers;
 }
 
 /**
@@ -67,15 +67,16 @@ async function fetchCsrfToken(): Promise<string | null> {
     return csrfTokenPromise;
   }
 
-  const { accessToken } = useAuthStore.getState();
-  if (!accessToken) {
+  const { isAuthenticated } = useAuthStore.getState();
+  if (!isAuthenticated) {
     return null;
   }
 
   csrfTokenPromise = (async () => {
     try {
       const res = await fetch(`${API_BASE}/auth/csrf-token`, {
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
+        credentials: 'include', // Send httpOnly cookies
       });
       if (!res.ok) {
         console.warn('Failed to fetch CSRF token');
@@ -126,11 +127,16 @@ async function handleResponse<T>(response: Response, retryFn?: () => Promise<Res
       useAuthStore.getState().logout();
     }
 
-    const error = await response.json().catch(() => ({ error: { message: 'Request failed' } }));
+    const errorBody = await response.json().catch(() => ({ error: { message: 'Request failed' } }));
+    const error = errorBody.error || {};
+
+    // The server now sanitizes error messages, so we can display them directly
+    // The requestId can be used for support correlation if needed
     throw new ApiError(
       response.status,
-      error.error?.code || 'UNKNOWN_ERROR',
-      error.error?.message || 'Request failed'
+      error.code || 'UNKNOWN_ERROR',
+      error.message || 'An unexpected error occurred',
+      error.requestId
     );
   }
 
@@ -142,9 +148,9 @@ async function handleResponse<T>(response: Response, retryFn?: () => Promise<Res
 }
 
 async function tryRefreshToken(): Promise<boolean> {
-  // Check for refresh token before acquiring mutex
-  const { refreshToken } = useAuthStore.getState();
-  if (!refreshToken) return false;
+  // Check if authenticated before trying to refresh
+  const { isAuthenticated } = useAuthStore.getState();
+  if (!isAuthenticated) return false;
 
   // If a refresh is already in progress, wait for it instead of starting a new one
   // This prevents multiple concurrent refresh attempts creating multiple sessions
@@ -153,14 +159,14 @@ async function tryRefreshToken(): Promise<boolean> {
   }
 
   refreshPromise = (async () => {
-    const { refreshToken: token, setTokens, logout } = useAuthStore.getState();
-    if (!token) return false;
+    const { logout } = useAuthStore.getState();
 
     try {
+      // Refresh token is sent via httpOnly cookie automatically
       const res = await fetch(`${API_BASE}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: token }),
+        credentials: 'include', // Send httpOnly cookies
       });
 
       if (!res.ok) {
@@ -168,8 +174,7 @@ async function tryRefreshToken(): Promise<boolean> {
         return false;
       }
 
-      const data = await res.json();
-      setTokens(data.accessToken, data.refreshToken);
+      // New tokens are set via Set-Cookie headers, no need to store them
       return true;
     } catch {
       logout();
@@ -188,7 +193,7 @@ async function fetchWithAuth<T>(url: string, options: RequestInit = {}): Promise
   const needsCsrf = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method);
 
   const headers: HeadersInit = {
-    ...getAuthHeaders(),
+    ...getRequestHeaders(),
     ...options.headers,
   };
 
@@ -202,6 +207,7 @@ async function fetchWithAuth<T>(url: string, options: RequestInit = {}): Promise
   const doFetch = () => fetch(url, {
     ...options,
     headers,
+    credentials: 'include', // Send httpOnly cookies for authentication
   });
 
   const response = await doFetch();
@@ -214,6 +220,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // Receive httpOnly cookies
       body: JSON.stringify({ username, password }),
     });
     return handleResponse<LoginResponse>(res);
@@ -223,20 +230,19 @@ export const api = {
     const res = await fetch(`${API_BASE}/auth/login/totp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // Receive httpOnly cookies
       body: JSON.stringify({ username, password, totpCode }),
     });
     return handleResponse<AuthResponse>(res);
   },
 
   async logout() {
-    const { refreshToken } = useAuthStore.getState();
-    if (refreshToken) {
-      await fetch(`${API_BASE}/auth/logout`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ refreshToken }),
-      }).catch(() => {}); // Ignore errors on logout
-    }
+    // Logout call sends cookies automatically - server will clear them
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      credentials: 'include', // Send httpOnly cookies for server to clear
+    }).catch(() => {}); // Ignore errors on logout
     clearCsrfToken();
     useAuthStore.getState().logout();
   },
@@ -256,9 +262,10 @@ export const api = {
     const res = await fetch(`${API_BASE}/auth/setup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ username, password }),
     });
-    return handleResponse<AuthResponse>(res);
+    return handleResponse<{ success: boolean; message: string }>(res);
   },
 
   // User management (admin only)
@@ -411,10 +418,10 @@ export const api = {
     return fetchWithAuth<SessionInfo[]>(`${API_BASE}/auth/sessions`);
   },
 
-  async getSessionsWithCurrent(refreshToken: string) {
+  async getSessionsWithCurrent() {
+    // Refresh token is sent via httpOnly cookie automatically
     return fetchWithAuth<SessionInfo[]>(`${API_BASE}/auth/sessions/current`, {
       method: 'POST',
-      body: JSON.stringify({ refreshToken }),
     });
   },
 
@@ -424,10 +431,10 @@ export const api = {
     });
   },
 
-  async revokeOtherSessions(refreshToken: string) {
+  async revokeOtherSessions() {
+    // Refresh token is sent via httpOnly cookie automatically
     return fetchWithAuth<{ success: boolean; revokedCount: number }>(`${API_BASE}/auth/sessions/revoke-others`, {
       method: 'POST',
-      body: JSON.stringify({ refreshToken }),
     });
   },
 
@@ -719,8 +726,7 @@ export interface User {
 }
 
 export interface AuthResponse {
-  accessToken: string;
-  refreshToken: string;
+  // Tokens are now in httpOnly cookies - only user info returned in body
   expiresIn: number;
   user: User;
   totpSetupRequired?: boolean;
@@ -872,8 +878,12 @@ export interface TotpSetupResponse {
   backupCodes: string[];
 }
 
-export interface LoginResponse extends AuthResponse {
+export interface LoginResponse {
+  // Tokens are now in httpOnly cookies - only user info returned in body
+  user?: User;
+  expiresIn?: number;
   totpRequired?: boolean;
+  totpSetupRequired?: boolean;
   message?: string;
 }
 

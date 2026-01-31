@@ -60,6 +60,12 @@ function validateEnvConfig(isDev: boolean): void {
     errors.push(`CORS_ORIGIN must be a valid URL or '*': ${corsOrigin}`);
   }
 
+  // Validate STEP_CA_ACME_URL if provided
+  const stepCaAcmeUrl = process.env.STEP_CA_ACME_URL;
+  if (stepCaAcmeUrl && !isValidUrl(stepCaAcmeUrl)) {
+    errors.push(`STEP_CA_ACME_URL is not a valid URL: ${stepCaAcmeUrl}`);
+  }
+
   // In production, certain env vars are required
   if (!isDev) {
     if (!process.env.JWT_SECRET) {
@@ -199,6 +205,13 @@ export const config = {
       : '/opt/ownprem/repo/apps/ui/dist'),
   },
 
+  stepCa: {
+    // ACME directory URL for step-ca (configurable for custom deployments)
+    acmeUrl: process.env.STEP_CA_ACME_URL || 'https://ca.ownprem.local:8443/acme/acme/directory',
+    // Path to step-ca root CA certificate
+    rootCertPath: process.env.STEP_CA_ROOT_CERT || '/etc/step-ca/root_ca.crt',
+  },
+
   secrets: {
     key: process.env.SECRETS_KEY || '',
   },
@@ -215,6 +228,18 @@ export const config = {
     debugHint: jwtSecretResult.debugHint,
     accessTokenExpiry: '15m',
     refreshTokenExpiry: '7d',
+  },
+
+  cookies: {
+    // Cookie security settings
+    secure: !isDevelopment, // Require HTTPS in production
+    sameSite: 'strict' as const,
+    httpOnly: true,
+    // Access token cookie (short-lived)
+    accessTokenMaxAge: 15 * 60 * 1000, // 15 minutes in ms
+    // Refresh token cookie (longer-lived, restricted path)
+    refreshTokenMaxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+    refreshTokenPath: '/api/auth', // Restrict refresh token to auth endpoints
   },
 
   security: {

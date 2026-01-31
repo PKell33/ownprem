@@ -7,10 +7,31 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../../db/index.js';
 import type { AppManifest } from '@ownprem/shared';
 import type { ProxyRoute, ProxyRouteRow } from './proxyTypes.js';
+import { ErrorCodes } from '@ownprem/shared';
+
+/**
+ * Custom error for route path conflicts.
+ */
+export class RouteConflictError extends Error {
+  public readonly code = ErrorCodes.CONFLICT;
+  public readonly statusCode = 409;
+  public readonly isOperational = true;
+
+  constructor(
+    public readonly path: string,
+    public readonly existingDeploymentId: string,
+    public readonly existingAppName: string
+  ) {
+    super(`Path "${path}" is already registered to app "${existingAppName}"`);
+    this.name = 'RouteConflictError';
+  }
+}
 
 /**
  * Register a web UI route for a deployment.
  * Creates the route as inactive - will be activated when app is started.
+ *
+ * @throws {RouteConflictError} if the path is already registered to a different deployment
  */
 export async function registerWebUiRoute(
   deploymentId: string,
@@ -26,14 +47,27 @@ export async function registerWebUiRoute(
   const host = serverHost || '127.0.0.1';
   const upstream = `http://${host}:${manifest.webui.port}`;
 
-  const existing = db.prepare('SELECT id FROM proxy_routes WHERE path = ?').get(path) as { id: string } | undefined;
+  // Check for existing route at this path
+  const existing = db.prepare(`
+    SELECT pr.id, pr.deployment_id, d.app_name
+    FROM proxy_routes pr
+    JOIN deployments d ON pr.deployment_id = d.id
+    WHERE pr.path = ?
+  `).get(path) as { id: string; deployment_id: string; app_name: string } | undefined;
 
   if (existing) {
+    // If the route belongs to a different deployment, return conflict error
+    if (existing.deployment_id !== deploymentId) {
+      throw new RouteConflictError(path, existing.deployment_id, existing.app_name);
+    }
+
+    // Same deployment updating its own route - allow it
     db.prepare(`
-      UPDATE proxy_routes SET upstream = ?, active = FALSE, deployment_id = ?
+      UPDATE proxy_routes SET upstream = ?, active = FALSE
       WHERE id = ?
-    `).run(upstream, deploymentId, existing.id);
+    `).run(upstream, existing.id);
   } else {
+    // No existing route - create new one
     const id = uuidv4();
     db.prepare(`
       INSERT INTO proxy_routes (id, deployment_id, path, upstream, active)

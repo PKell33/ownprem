@@ -18,8 +18,7 @@ interface User {
 }
 
 interface AuthState {
-  accessToken: string | null;
-  refreshToken: string | null;
+  // User info only - tokens are now stored in httpOnly cookies (not accessible to JS)
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -27,7 +26,7 @@ interface AuthState {
   totpSetupRequired: boolean;
 
   // Actions
-  setTokens: (accessToken: string, refreshToken: string) => void;
+  setAuthenticated: (user: User) => void;
   setUser: (user: User) => void;
   setError: (error: string | null) => void;
   setLoading: (loading: boolean) => void;
@@ -39,18 +38,15 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      accessToken: null,
-      refreshToken: null,
       user: null,
       isAuthenticated: false,
       isLoading: false,
       error: null,
       totpSetupRequired: false,
 
-      setTokens: (accessToken, refreshToken) =>
+      setAuthenticated: (user) =>
         set({
-          accessToken,
-          refreshToken,
+          user,
           isAuthenticated: true,
           error: null,
         }),
@@ -65,8 +61,6 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () =>
         set({
-          accessToken: null,
-          refreshToken: null,
           user: null,
           isAuthenticated: false,
           error: null,
@@ -77,9 +71,8 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'ownprem-auth',
+      // Only persist user info and auth state - tokens are in httpOnly cookies
       partialize: (state) => ({
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
         user: state.user,
         isAuthenticated: state.isAuthenticated,
         totpSetupRequired: state.totpSetupRequired,

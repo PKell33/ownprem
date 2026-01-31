@@ -405,7 +405,6 @@ function TwoFactorAuth() {
 }
 
 function SessionManagement() {
-  const { refreshToken } = useAuthStore();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -417,13 +416,9 @@ function SessionManagement() {
     try {
       setLoading(true);
       setError(null);
-      if (refreshToken) {
-        const data = await api.getSessionsWithCurrent(refreshToken);
-        setSessions(data);
-      } else {
-        const data = await api.getSessions();
-        setSessions(data);
-      }
+      // Refresh token is sent via httpOnly cookie automatically
+      const data = await api.getSessionsWithCurrent();
+      setSessions(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load sessions');
     } finally {
@@ -449,14 +444,11 @@ function SessionManagement() {
   };
 
   const handleRevokeOthers = async () => {
-    if (!refreshToken) {
-      return;
-    }
-
     try {
       setRevoking('all');
       setConfirmRevokeAll(false);
-      const result = await api.revokeOtherSessions(refreshToken);
+      // Refresh token is sent via httpOnly cookie automatically
+      const result = await api.revokeOtherSessions();
       if (result.revokedCount > 0) {
         setSessions(sessions.filter(s => s.isCurrent));
       }
