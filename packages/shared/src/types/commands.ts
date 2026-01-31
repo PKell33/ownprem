@@ -5,6 +5,7 @@ import type { DataDirectory } from './app.js';
 export interface AgentCommand {
   id: string;
   action: 'install' | 'configure' | 'start' | 'stop' | 'restart' | 'uninstall' | 'getLogs'
+        | 'streamLogs' | 'stopStreamLogs'
         | 'mountStorage' | 'unmountStorage' | 'checkMount'
         | 'configureKeepalived' | 'checkKeepalived';
   appName: string;
@@ -94,6 +95,27 @@ export interface LogResult {
   source: 'journalctl' | 'file';
   hasMore: boolean;
   status: 'success' | 'error';
+  message?: string;
+}
+
+export interface LogStreamPayload {
+  grep?: string;
+  source?: 'journalctl' | 'file' | 'auto';
+  serviceName?: string;
+  logPath?: string;
+}
+
+export interface LogStreamLine {
+  streamId: string;
+  appName: string;
+  line: string;
+  timestamp: string;
+}
+
+export interface LogStreamStatus {
+  streamId: string;
+  appName: string;
+  status: 'started' | 'stopped' | 'error';
   message?: string;
 }
 

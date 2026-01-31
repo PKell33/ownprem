@@ -1,8 +1,11 @@
 import { spawnSync, spawn, ChildProcess } from 'child_process';
 import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, statSync, unlinkSync } from 'fs';
 import { dirname, resolve, normalize } from 'path';
-import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult, MountCommandPayload, MountCheckResult } from '@ownprem/shared';
+import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult, LogStreamPayload, LogStreamLine, MountCommandPayload, MountCheckResult } from '@ownprem/shared';
 import { privilegedClient } from './privilegedClient.js';
+import logger from './lib/logger.js';
+
+const executorLogger = logger.child({ component: 'executor' });
 
 // Allowed base directories for file operations
 const ALLOWED_PATH_PREFIXES = [
@@ -63,6 +66,7 @@ const ALLOWED_MOUNT_OPTIONS = new Set([
 
 export class Executor {
   private runningProcesses: Map<string, ChildProcess> = new Map();
+  private activeLogStreams: Map<string, ChildProcess> = new Map();
   private appsDir: string;
   private dataDir: string;
   private allowedPaths: string[];
@@ -146,33 +150,33 @@ export class Executor {
 
     // Create service user if specified
     if (serviceUser) {
-      console.log(`Creating service user: ${serviceUser}`);
+      executorLogger.info(`Creating service user: ${serviceUser}`);
       try {
         const homeDir = dataDirectories[0]?.path || `/var/lib/${serviceUser}`;
         const result = await privilegedClient.createServiceUser(serviceUser, homeDir);
         if (result.success) {
-          console.log(`Service user created: ${serviceUser}`);
+          executorLogger.info(`Service user created: ${serviceUser}`);
         } else if (!result.error?.includes('already exists')) {
-          console.warn(`Could not create service user: ${result.error}`);
+          executorLogger.warn(`Could not create service user: ${result.error}`);
         }
       } catch (err) {
-        console.warn(`Failed to create service user via helper: ${err}`);
+        executorLogger.warn(`Failed to create service user via helper: ${err}`);
       }
     }
 
     // Create data directories with correct ownership
     for (const dir of dataDirectories) {
-      console.log(`Creating data directory: ${dir.path}`);
+      executorLogger.info(`Creating data directory: ${dir.path}`);
       try {
         const owner = serviceUser && serviceGroup ? `${serviceUser}:${serviceGroup}` : undefined;
         const result = await privilegedClient.createDirectory(dir.path, owner, '755');
         if (result.success) {
-          console.log(`Created directory: ${dir.path}`);
+          executorLogger.info(`Created directory: ${dir.path}`);
         } else {
-          console.warn(`Could not create directory ${dir.path}: ${result.error}`);
+          executorLogger.warn(`Could not create directory ${dir.path}: ${result.error}`);
         }
       } catch (err) {
-        console.warn(`Failed to create directory via helper: ${err}`);
+        executorLogger.warn(`Failed to create directory via helper: ${err}`);
       }
     }
 
@@ -180,7 +184,7 @@ export class Executor {
     if (metadata) {
       const metadataPath = `${appDir}/.ownprem.json`;
       writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-      console.log(`Wrote metadata: ${metadataPath}`);
+      executorLogger.info(`Wrote metadata: ${metadataPath}`);
     }
 
     // Write config files (install script, configs, etc.)
@@ -210,14 +214,14 @@ export class Executor {
     for (const cap of capabilities) {
       const binaryPath = `${appDir}/bin/${appName.replace('ownprem-', '')}`;
       if (existsSync(binaryPath)) {
-        console.log(`Setting capability ${cap} on ${binaryPath}`);
+        executorLogger.info(`Setting capability ${cap} on ${binaryPath}`);
         try {
           const result = await privilegedClient.setCapability(binaryPath, cap);
           if (!result.success) {
-            console.warn(`Could not set capability: ${result.error}`);
+            executorLogger.warn(`Could not set capability: ${result.error}`);
           }
         } catch (err) {
-          console.warn(`Failed to set capability via helper: ${err}`);
+          executorLogger.warn(`Failed to set capability via helper: ${err}`);
         }
       }
     }
@@ -226,7 +230,7 @@ export class Executor {
     const serviceName = metadata?.serviceName || appName;
     const serviceTemplate = `${appDir}/templates/${serviceName}.service`;
     if (existsSync(serviceTemplate)) {
-      console.log(`Installing systemd service: ${serviceName}`);
+      executorLogger.info(`Installing systemd service: ${serviceName}`);
       try {
         // Read template and substitute variables
         let serviceContent = readFileSync(serviceTemplate, 'utf-8');
@@ -240,7 +244,7 @@ export class Executor {
         const servicePath = `/etc/systemd/system/${serviceName}.service`;
         const result = await privilegedClient.writeFile(servicePath, serviceContent);
         if (result.success) {
-          console.log(`Wrote systemd service: ${servicePath}`);
+          executorLogger.info(`Wrote systemd service: ${servicePath}`);
 
           // Reload systemd
           await privilegedClient.systemctl('daemon-reload');
@@ -248,13 +252,13 @@ export class Executor {
           // Enable service
           const enableResult = await privilegedClient.systemctl('enable', serviceName);
           if (enableResult.success) {
-            console.log(`Enabled service: ${serviceName}`);
+            executorLogger.info(`Enabled service: ${serviceName}`);
           }
         } else {
-          console.warn(`Could not write systemd service: ${result.error}`);
+          executorLogger.warn(`Could not write systemd service: ${result.error}`);
         }
       } catch (err) {
-        console.warn(`Failed to install systemd service: ${err}`);
+        executorLogger.warn(`Failed to install systemd service: ${err}`);
       }
     }
   }
@@ -299,9 +303,9 @@ export class Executor {
     const { rmSync } = await import('fs');
     try {
       rmSync(appDir, { recursive: true, force: true });
-      console.log(`Removed app directory: ${appDir}`);
+      executorLogger.info(`Removed app directory: ${appDir}`);
     } catch (err) {
-      console.error(`Failed to remove app directory: ${err}`);
+      executorLogger.error(`Failed to remove app directory: ${err}`);
     }
   }
 
@@ -518,7 +522,7 @@ export class Executor {
         const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8'));
         if (metadata.serviceName) {
           actualServiceName = metadata.serviceName;
-          console.log(`Using service name from metadata: ${actualServiceName} (app: ${service})`);
+          executorLogger.info(`Using service name from metadata: ${actualServiceName} (app: ${service})`);
         }
       } catch {
         // Ignore metadata parse errors, use service name as fallback
@@ -532,13 +536,13 @@ export class Executor {
         actualServiceName
       );
       if (result.success) {
-        console.log(`systemctl ${action} ${actualServiceName} succeeded via privileged helper`);
+        executorLogger.info(`systemctl ${action} ${actualServiceName} succeeded via privileged helper`);
         return;
       }
-      console.log(`Privileged helper systemctl failed: ${result.error}, trying fallback`);
+      executorLogger.info(`Privileged helper systemctl failed: ${result.error}, trying fallback`);
     } catch (err) {
       // Privileged helper not available, try direct or dev mode
-      console.log(`Privileged helper not available: ${err}, trying fallback`);
+      executorLogger.info(`Privileged helper not available: ${err}, trying fallback`);
     }
 
     // Fallback: try direct systemctl (works if running as root in dev)
@@ -547,7 +551,7 @@ export class Executor {
       return;
     } catch (err) {
       // If systemctl fails, try dev mode fallback
-      console.log(`Direct systemctl failed, trying dev mode fallback for ${action} ${service}`);
+      executorLogger.info(`Direct systemctl failed, trying dev mode fallback for ${action} ${service}`);
     }
 
     // Dev mode fallback (uses start.sh/stop.sh scripts)
@@ -568,12 +572,12 @@ export class Executor {
           },
         });
 
-        proc.stdout?.on('data', (data) => console.log(`[${service}] ${data.toString().trim()}`));
-        proc.stderr?.on('data', (data) => console.error(`[${service}] ${data.toString().trim()}`));
+        proc.stdout?.on('data', (data) => executorLogger.info(`[${service}] ${data.toString().trim()}`));
+        proc.stderr?.on('data', (data) => executorLogger.error(`[${service}] ${data.toString().trim()}`));
 
         this.runningProcesses.set(service, proc);
         proc.unref();
-        console.log(`Started ${service} in dev mode (pid: ${proc.pid})`);
+        executorLogger.info(`Started ${service} in dev mode (pid: ${proc.pid})`);
       } else {
         throw new Error(`No start.sh found for ${service} in dev mode`);
       }
@@ -591,7 +595,7 @@ export class Executor {
           },
         });
         if (result.status !== 0) {
-          console.error(`stop.sh failed: ${result.stderr?.toString()}`);
+          executorLogger.error(`stop.sh failed: ${result.stderr?.toString()}`);
         }
       }
       // Also clean up tracked process
@@ -604,7 +608,7 @@ export class Executor {
         }
         this.runningProcesses.delete(service);
       }
-      console.log(`Stopped ${service} in dev mode`);
+      executorLogger.info(`Stopped ${service} in dev mode`);
     } else if (action === 'restart') {
       await this.systemctl('stop', service);
       await this.systemctl('start', service);
@@ -660,7 +664,7 @@ export class Executor {
           if (!existsSync(dir)) {
             const dirResult = await privilegedClient.createDirectory(dir);
             if (!dirResult.success) {
-              console.warn(`Failed to create directory ${dir} via helper: ${dirResult.error}`);
+              executorLogger.warn(`Failed to create directory ${dir} via helper: ${dirResult.error}`);
             }
           }
 
@@ -674,10 +678,10 @@ export class Executor {
           if (!writeResult.success) {
             throw new Error(`Failed to write ${safePath} via helper: ${writeResult.error}`);
           }
-          console.log(`Wrote file (via helper): ${safePath}`);
+          executorLogger.info(`Wrote file (via helper): ${safePath}`);
         } catch (err) {
           // Fall back to direct write (may fail without privileges)
-          console.warn(`Privileged helper failed, attempting direct write: ${err}`);
+          executorLogger.warn(`Privileged helper failed, attempting direct write: ${err}`);
           await this.writeFileDirect(safePath, file);
         }
       } else {
@@ -713,15 +717,15 @@ export class Executor {
           const spawnResult = spawnSync('chown', [safeOwner, safePath], { stdio: 'pipe' });
           if (spawnResult.status !== 0) {
             const stderr = spawnResult.stderr?.toString() || 'Unknown error';
-            console.warn(`Failed to change owner of ${safePath}: ${stderr}`);
+            executorLogger.warn(`Failed to change owner of ${safePath}: ${stderr}`);
           }
         }
       } catch (err) {
-        console.warn(`Failed to change owner of ${safePath}: ${err}`);
+        executorLogger.warn(`Failed to change owner of ${safePath}: ${err}`);
       }
     }
 
-    console.log(`Wrote file: ${safePath}`);
+    executorLogger.info(`Wrote file: ${safePath}`);
   }
 
   private async runScript(script: string, env: Record<string, string | undefined>): Promise<void> {
@@ -734,7 +738,7 @@ export class Executor {
     }
 
     return new Promise((resolve, reject) => {
-      console.log(`Running script: ${safeScript}`);
+      executorLogger.info(`Running script: ${safeScript}`);
 
       const proc = spawn('bash', [safeScript], {
         stdio: 'inherit',
@@ -743,7 +747,7 @@ export class Executor {
 
       proc.on('close', (code) => {
         if (code === 0) {
-          console.log(`Script completed: ${safeScript}`);
+          executorLogger.info(`Script completed: ${safeScript}`);
           resolve();
         } else {
           reject(new Error(`Script ${safeScript} failed with code ${code}`));
@@ -836,11 +840,11 @@ export class Executor {
     // Check if already mounted
     const checkResult = await this.checkMount(safeMountPoint);
     if (checkResult.mounted) {
-      console.log(`Already mounted: ${safeMountPoint}`);
+      executorLogger.info(`Already mounted: ${safeMountPoint}`);
       return;
     }
 
-    console.log(`Mounting ${mountType.toUpperCase()}: ${safeSource} -> ${safeMountPoint}`);
+    executorLogger.info(`Mounting ${mountType.toUpperCase()}: ${safeSource} -> ${safeMountPoint}`);
 
     // Use privileged helper for mount operation
     try {
@@ -856,10 +860,10 @@ export class Executor {
         throw new Error(`Mount failed: ${result.error}`);
       }
 
-      console.log(`Successfully mounted: ${safeMountPoint}`);
+      executorLogger.info(`Successfully mounted: ${safeMountPoint}`);
     } catch (err) {
       // Privileged helper not available, try direct mount (requires root)
-      console.warn(`Privileged helper failed, attempting direct mount: ${err}`);
+      executorLogger.warn(`Privileged helper failed, attempting direct mount: ${err}`);
       await this.mountStorageDirect(payload);
     }
   }
@@ -877,7 +881,7 @@ export class Executor {
     // Create mount point directory if it doesn't exist
     if (!existsSync(safeMountPoint)) {
       mkdirSync(safeMountPoint, { recursive: true });
-      console.log(`Created mount point: ${safeMountPoint}`);
+      executorLogger.info(`Created mount point: ${safeMountPoint}`);
     }
 
     // Build mount command args
@@ -932,7 +936,7 @@ export class Executor {
       }
     }
 
-    console.log(`Successfully mounted: ${safeMountPoint}`);
+    executorLogger.info(`Successfully mounted: ${safeMountPoint}`);
   }
 
   /**
@@ -944,11 +948,11 @@ export class Executor {
     // Check if mounted
     const checkResult = await this.checkMount(safeMountPoint);
     if (!checkResult.mounted) {
-      console.log(`Not mounted: ${safeMountPoint}`);
+      executorLogger.info(`Not mounted: ${safeMountPoint}`);
       return;
     }
 
-    console.log(`Unmounting: ${safeMountPoint}`);
+    executorLogger.info(`Unmounting: ${safeMountPoint}`);
 
     // Use privileged helper for unmount operation
     try {
@@ -958,10 +962,10 @@ export class Executor {
         throw new Error(`Unmount failed: ${result.error}`);
       }
 
-      console.log(`Successfully unmounted: ${safeMountPoint}`);
+      executorLogger.info(`Successfully unmounted: ${safeMountPoint}`);
     } catch (err) {
       // Privileged helper not available, try direct umount (requires root)
-      console.warn(`Privileged helper failed, attempting direct unmount: ${err}`);
+      executorLogger.warn(`Privileged helper failed, attempting direct unmount: ${err}`);
 
       const result = spawnSync('umount', [safeMountPoint], {
         encoding: 'utf-8',
@@ -972,7 +976,7 @@ export class Executor {
         throw new Error(`Unmount failed: ${result.stderr || 'Unknown error'}`);
       }
 
-      console.log(`Successfully unmounted: ${safeMountPoint}`);
+      executorLogger.info(`Successfully unmounted: ${safeMountPoint}`);
     }
   }
 
@@ -1047,7 +1051,7 @@ export class Executor {
         // Fallback to direct creation
         mkdirSync(keepalivedDir, { recursive: true });
       }
-      console.log(`Created keepalived directory: ${keepalivedDir}`);
+      executorLogger.info(`Created keepalived directory: ${keepalivedDir}`);
     }
 
     // Write configuration via privileged helper
@@ -1056,7 +1060,7 @@ export class Executor {
       // Fallback to direct write
       writeFileSync(keepalivedConf, config, { mode: 0o644 });
     }
-    console.log('Wrote keepalived configuration');
+    executorLogger.info('Wrote keepalived configuration');
 
     if (enabled) {
       // Check if keepalived is installed
@@ -1067,19 +1071,19 @@ export class Executor {
 
       if (whichResult.status !== 0) {
         // Install keepalived via privileged helper
-        console.log('Installing keepalived...');
+        executorLogger.info('Installing keepalived...');
         const installResult = await privilegedClient.aptInstall(['keepalived']);
 
         if (!installResult.success) {
           throw new Error(`Failed to install keepalived: ${installResult.error}`);
         }
-        console.log('Keepalived installed');
+        executorLogger.info('Keepalived installed');
       }
 
       // Enable keepalived via privileged helper
       const enableResult = await privilegedClient.systemctl('enable', 'keepalived');
       if (!enableResult.success) {
-        console.warn(`Warning: Could not enable keepalived: ${enableResult.error}`);
+        executorLogger.warn(`Warning: Could not enable keepalived: ${enableResult.error}`);
       }
 
       // Check if service is running
@@ -1094,25 +1098,25 @@ export class Executor {
         if (!restartResult.success) {
           throw new Error(`Failed to restart keepalived: ${restartResult.error}`);
         }
-        console.log('Keepalived configuration reloaded');
+        executorLogger.info('Keepalived configuration reloaded');
       } else {
         // Start the service
         const startResult = await privilegedClient.systemctl('start', 'keepalived');
         if (!startResult.success) {
           throw new Error(`Failed to start keepalived: ${startResult.error}`);
         }
-        console.log('Keepalived started');
+        executorLogger.info('Keepalived started');
       }
     } else {
       // Stop keepalived via privileged helper
       const stopResult = await privilegedClient.systemctl('stop', 'keepalived');
       if (!stopResult.success) {
-        console.warn(`Warning: Could not stop keepalived: ${stopResult.error}`);
+        executorLogger.warn(`Warning: Could not stop keepalived: ${stopResult.error}`);
       }
 
       // Disable keepalived
       await privilegedClient.systemctl('disable', 'keepalived');
-      console.log('Keepalived disabled');
+      executorLogger.info('Keepalived disabled');
     }
   }
 
@@ -1193,11 +1197,11 @@ export class Executor {
 
     // Write certificate (readable by services)
     writeFileSync(certPath, certPem, { mode: 0o644 });
-    console.log(`Wrote certificate to ${certPath}`);
+    executorLogger.info(`Wrote certificate to ${certPath}`);
 
     // Write private key (restricted permissions)
     writeFileSync(keyPath, keyPem, { mode: 0o600 });
-    console.log(`Wrote private key to ${keyPath}`);
+    executorLogger.info(`Wrote private key to ${keyPath}`);
 
     // Write CA certificate if provided
     if (caCertPem && paths.caPath) {
@@ -1207,7 +1211,242 @@ export class Executor {
         mkdirSync(caDir, { recursive: true });
       }
       writeFileSync(caPath, caCertPem, { mode: 0o644 });
-      console.log(`Wrote CA certificate to ${caPath}`);
+      executorLogger.info(`Wrote CA certificate to ${caPath}`);
     }
+  }
+
+  // ===============================
+  // Log Streaming
+  // ===============================
+
+  /**
+   * Start streaming logs for an app.
+   * Returns a stream ID that can be used to stop the stream.
+   */
+  startLogStream(
+    streamId: string,
+    appName: string,
+    options: LogStreamPayload,
+    onLine: (line: LogStreamLine) => void,
+    onError: (error: string) => void
+  ): boolean {
+    // Validate app name
+    if (!APP_NAME_PATTERN.test(appName)) {
+      onError(`Invalid app name: ${appName}`);
+      return false;
+    }
+
+    // Check if stream already exists
+    if (this.activeLogStreams.has(streamId)) {
+      executorLogger.warn({ streamId, appName }, 'Stream already exists');
+      return false;
+    }
+
+    const serviceName = options.serviceName || appName;
+    const source = options.source || 'auto';
+
+    // Try journalctl first (for systemd services)
+    if (source === 'auto' || source === 'journalctl') {
+      const args = ['--no-pager', '-u', serviceName, '-f', '--output=short-iso'];
+
+      if (options.grep) {
+        args.push('--grep', options.grep);
+      }
+
+      const proc = spawn('journalctl', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let started = false;
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        started = true;
+        const lines = data.toString().split('\n').filter(line => line.trim());
+        for (const line of lines) {
+          onLine({
+            streamId,
+            appName,
+            line,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      proc.stderr?.on('data', (data: Buffer) => {
+        executorLogger.warn({ streamId, appName }, `Stream stderr: ${data.toString()}`);
+      });
+
+      proc.on('error', (err) => {
+        executorLogger.error({ streamId, appName, err }, 'Stream process error');
+        onError(err.message);
+        this.activeLogStreams.delete(streamId);
+      });
+
+      proc.on('close', (code) => {
+        executorLogger.info({ streamId, appName, code }, 'Log stream closed');
+        this.activeLogStreams.delete(streamId);
+      });
+
+      this.activeLogStreams.set(streamId, proc);
+      executorLogger.info({ streamId, appName, serviceName }, 'Started log stream');
+
+      // If journalctl exits immediately, the service might not exist
+      // Give it a moment to start producing output
+      setTimeout(() => {
+        if (!started && proc.exitCode !== null && source === 'auto') {
+          // journalctl failed immediately, try file-based streaming
+          this.activeLogStreams.delete(streamId);
+          this.startFileLogStream(streamId, appName, options, onLine, onError);
+        }
+      }, 1000);
+
+      return true;
+    }
+
+    // File-based log streaming
+    return this.startFileLogStream(streamId, appName, options, onLine, onError);
+  }
+
+  /**
+   * Start file-based log streaming using tail -f
+   */
+  private startFileLogStream(
+    streamId: string,
+    appName: string,
+    options: LogStreamPayload,
+    onLine: (line: LogStreamLine) => void,
+    onError: (error: string) => void
+  ): boolean {
+    const appDir = `${this.appsDir}/${appName}`;
+    const appDataDir = `${this.dataDir}/${appName}`;
+
+    // Build list of paths to try
+    const pathsToTry: string[] = [];
+
+    if (options.logPath) {
+      const expandedPath = options.logPath
+        .replace(/\$\{appName\}/g, appName)
+        .replace(/\$\{appDir\}/g, appDir)
+        .replace(/\$\{dataDir\}/g, appDataDir);
+      pathsToTry.push(expandedPath);
+    }
+
+    pathsToTry.push(
+      `${appDataDir}/${appName}.log`,
+      `${appDataDir}/debug.log`,
+      `${appDir}/${appName}.log`,
+      `${appDir}/output.log`,
+      `/var/log/${appName}.log`,
+    );
+
+    // Find the first existing log file
+    let logPath: string | null = null;
+    for (const path of pathsToTry) {
+      if (existsSync(path)) {
+        logPath = path;
+        break;
+      }
+    }
+
+    if (!logPath) {
+      onError(`No log file found for ${appName}`);
+      return false;
+    }
+
+    // Validate the path is within allowed directories
+    try {
+      this.validatePath(logPath);
+    } catch (err) {
+      onError(`Log path not allowed: ${logPath}`);
+      return false;
+    }
+
+    const args = ['-F', '-n', '0', logPath];
+
+    const proc = spawn('tail', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      const lines = data.toString().split('\n').filter(line => line.trim());
+      for (const line of lines) {
+        // Apply grep filter if specified
+        if (options.grep) {
+          const grepPattern = new RegExp(options.grep, 'i');
+          if (!grepPattern.test(line)) {
+            continue;
+          }
+        }
+        onLine({
+          streamId,
+          appName,
+          line,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    proc.stderr?.on('data', (data: Buffer) => {
+      executorLogger.warn({ streamId, appName }, `Stream stderr: ${data.toString()}`);
+    });
+
+    proc.on('error', (err) => {
+      executorLogger.error({ streamId, appName, err }, 'Stream process error');
+      onError(err.message);
+      this.activeLogStreams.delete(streamId);
+    });
+
+    proc.on('close', (code) => {
+      executorLogger.info({ streamId, appName, code }, 'Log stream closed');
+      this.activeLogStreams.delete(streamId);
+    });
+
+    this.activeLogStreams.set(streamId, proc);
+    executorLogger.info({ streamId, appName, logPath }, 'Started file-based log stream');
+
+    return true;
+  }
+
+  /**
+   * Stop a log stream
+   */
+  stopLogStream(streamId: string): boolean {
+    const proc = this.activeLogStreams.get(streamId);
+    if (!proc) {
+      executorLogger.warn({ streamId }, 'Stream not found');
+      return false;
+    }
+
+    try {
+      proc.kill('SIGTERM');
+      this.activeLogStreams.delete(streamId);
+      executorLogger.info({ streamId }, 'Stopped log stream');
+      return true;
+    } catch (err) {
+      executorLogger.error({ streamId, err }, 'Failed to stop log stream');
+      return false;
+    }
+  }
+
+  /**
+   * Stop all active log streams (for cleanup on shutdown)
+   */
+  stopAllLogStreams(): void {
+    for (const [streamId, proc] of this.activeLogStreams) {
+      try {
+        proc.kill('SIGTERM');
+        executorLogger.info({ streamId }, 'Stopped log stream during cleanup');
+      } catch {
+        // Ignore errors during cleanup
+      }
+    }
+    this.activeLogStreams.clear();
+  }
+
+  /**
+   * Get active stream count (for monitoring)
+   */
+  getActiveStreamCount(): number {
+    return this.activeLogStreams.size;
   }
 }

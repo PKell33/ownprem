@@ -4,6 +4,79 @@ import { randomBytes } from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Validates that a string is a valid URL
+ */
+function isValidUrl(str: string): boolean {
+  try {
+    new URL(str);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates that a port number is in valid range (1-65535)
+ */
+function isValidPort(port: number): boolean {
+  return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
+/**
+ * Validates environment variable configuration at startup.
+ * Throws an error if critical configuration is invalid.
+ */
+function validateEnvConfig(isDev: boolean): void {
+  const errors: string[] = [];
+
+  // Validate CADDY_ADMIN_URL if provided
+  const caddyAdminUrl = process.env.CADDY_ADMIN_URL;
+  if (caddyAdminUrl && !isValidUrl(caddyAdminUrl)) {
+    errors.push(`CADDY_ADMIN_URL is not a valid URL: ${caddyAdminUrl}`);
+  }
+
+  // Validate PORT if provided
+  const port = process.env.PORT;
+  if (port) {
+    const portNum = parseInt(port, 10);
+    if (isNaN(portNum) || !isValidPort(portNum)) {
+      errors.push(`PORT must be a valid port number (1-65535): ${port}`);
+    }
+  }
+
+  // Validate DEV_UI_PORT if provided
+  const devUiPort = process.env.DEV_UI_PORT;
+  if (devUiPort) {
+    const portNum = parseInt(devUiPort, 10);
+    if (isNaN(portNum) || !isValidPort(portNum)) {
+      errors.push(`DEV_UI_PORT must be a valid port number (1-65535): ${devUiPort}`);
+    }
+  }
+
+  // Validate CORS_ORIGIN if provided (should be a valid URL or '*')
+  const corsOrigin = process.env.CORS_ORIGIN;
+  if (corsOrigin && corsOrigin !== '*' && !isValidUrl(corsOrigin)) {
+    errors.push(`CORS_ORIGIN must be a valid URL or '*': ${corsOrigin}`);
+  }
+
+  // In production, certain env vars are required
+  if (!isDev) {
+    if (!process.env.JWT_SECRET) {
+      // This is handled separately in getJwtSecret(), but we note it here for completeness
+    }
+    if (!process.env.SECRETS_KEY) {
+      errors.push('SECRETS_KEY is required in production for encrypting secrets');
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      'Invalid environment configuration:\n  - ' + errors.join('\n  - ')
+    );
+  }
+}
+
 const nodeEnv = process.env.NODE_ENV;
 if (!nodeEnv) {
   console.warn('WARNING: NODE_ENV not set - defaulting to production mode for safety');
@@ -88,5 +161,8 @@ export const config = {
     origin: process.env.CORS_ORIGIN || (isDevelopment ? '*' : ''),
   },
 };
+
+// Validate environment configuration at module load
+validateEnvConfig(isDevelopment);
 
 export type Config = typeof config;

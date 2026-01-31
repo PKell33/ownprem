@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { RefreshCw, Download, Search, X, ChevronDown, Database, FileText } from 'lucide-react';
+import { RefreshCw, Download, Search, X, ChevronDown, Database, FileText, Radio } from 'lucide-react';
 import { api, LogsResponse } from '../api/client';
+import { useLogStream } from '../hooks/useLogStream';
 import Modal from './Modal';
 
 interface LogViewerModalProps {
@@ -24,9 +25,15 @@ export default function LogViewerModal({
   const [filter, setFilter] = useState('');
   const [appliedFilter, setAppliedFilter] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [streamMode, setStreamMode] = useState(false);
   const [lines, setLines] = useState(100);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // WebSocket log streaming
+  const logStream = useLogStream(streamMode && isOpen ? deploymentId : null, {
+    maxLines: 1000,
+  });
 
   const fetchLogs = useCallback(async (grep?: string, lineCount?: number) => {
     setLoading(true);
@@ -56,7 +63,9 @@ export default function LogViewerModal({
 
   useEffect(() => {
     if (isOpen) {
-      fetchLogs();
+      if (!streamMode) {
+        fetchLogs();
+      }
     } else {
       // Reset state when modal closes
       setLogs([]);
@@ -64,8 +73,22 @@ export default function LogViewerModal({
       setFilter('');
       setAppliedFilter('');
       setAutoRefresh(false);
+      setStreamMode(false);
     }
-  }, [isOpen, fetchLogs]);
+  }, [isOpen, fetchLogs, streamMode]);
+
+  // Handle stream mode changes
+  useEffect(() => {
+    if (streamMode && isOpen) {
+      logStream.subscribe();
+      setAutoRefresh(false); // Disable polling when streaming
+    } else {
+      logStream.unsubscribe();
+    }
+  }, [streamMode, isOpen, logStream]);
+
+  // Combine HTTP-fetched logs with streamed logs when streaming
+  const displayLogs = streamMode ? [...logs, ...logStream.lines] : logs;
 
   useEffect(() => {
     if (autoRefresh && isOpen) {
@@ -117,7 +140,7 @@ export default function LogViewerModal({
   };
 
   const handleDownload = () => {
-    const content = logs.join('\n');
+    const content = displayLogs.join('\n');
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -172,21 +195,35 @@ export default function LogViewerModal({
             <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
           </button>
 
-          {/* Auto-refresh toggle */}
-          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+          {/* Stream toggle */}
+          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer" title="Real-time log streaming">
             <input
               type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
+              checked={streamMode}
+              onChange={(e) => setStreamMode(e.target.checked)}
               className="rounded border-gray-300 dark:border-gray-600 text-accent focus:ring-accent"
             />
-            Auto-refresh
+            <Radio size={14} className={logStream.isStreaming ? 'text-green-500' : ''} />
+            Stream
           </label>
+
+          {/* Auto-refresh toggle (only when not streaming) */}
+          {!streamMode && (
+            <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="rounded border-gray-300 dark:border-gray-600 text-accent focus:ring-accent"
+              />
+              Auto-refresh
+            </label>
+          )}
 
           {/* Download button */}
           <button
             onClick={handleDownload}
-            disabled={logs.length === 0}
+            disabled={displayLogs.length === 0}
             className="p-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
             title="Download logs"
           >
@@ -215,22 +252,27 @@ export default function LogViewerModal({
           ref={logContainerRef}
           className="flex-1 bg-gray-800 dark:bg-gray-900 rounded-lg overflow-auto font-mono text-xs p-4"
         >
-          {loading && logs.length === 0 ? (
+          {loading && displayLogs.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-400">
               <RefreshCw className="animate-spin mr-2" size={16} />
               Loading logs...
             </div>
-          ) : error ? (
-            <div className="flex items-center justify-center h-full text-red-400">
-              {error}
-            </div>
-          ) : logs.length === 0 ? (
+          ) : logStream.isConnecting ? (
             <div className="flex items-center justify-center h-full text-gray-400">
-              No logs available
+              <RefreshCw className="animate-spin mr-2" size={16} />
+              Connecting to log stream...
+            </div>
+          ) : (error || logStream.error) ? (
+            <div className="flex items-center justify-center h-full text-red-400">
+              {error || logStream.error}
+            </div>
+          ) : displayLogs.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-gray-400">
+              {streamMode ? 'Waiting for new log lines...' : 'No logs available'}
             </div>
           ) : (
             <div className="space-y-0.5">
-              {logs.map((line, index) => (
+              {displayLogs.map((line, index) => (
                 <div
                   key={index}
                   className="text-gray-200 hover:bg-gray-700 dark:hover:bg-gray-800 px-1 -mx-1 rounded whitespace-pre-wrap break-all"
@@ -256,9 +298,20 @@ export default function LogViewerModal({
         {/* Status bar */}
         <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
           <span>
-            {logs.length} line{logs.length !== 1 ? 's' : ''} shown
+            {displayLogs.length} line{displayLogs.length !== 1 ? 's' : ''} shown
+            {streamMode && logStream.lines.length > 0 && (
+              <span className="text-green-500 ml-2">
+                (+{logStream.lines.length} streamed)
+              </span>
+            )}
           </span>
-          {autoRefresh && (
+          {logStream.isStreaming && (
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              Streaming live
+            </span>
+          )}
+          {autoRefresh && !streamMode && (
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               Auto-refreshing every 5s

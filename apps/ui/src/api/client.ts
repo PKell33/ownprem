@@ -1,4 +1,30 @@
 import { useAuthStore } from '../stores/useAuthStore';
+import type {
+  ServerMetrics,
+  NetworkInfo,
+  AppSource,
+  ConfigField,
+  ServiceRequirement,
+  ServiceDefinition,
+  MountType,
+  MountStatus,
+  MountCredentials,
+  DeploymentStatus,
+} from '@ownprem/shared';
+
+// Re-export imported types for convenience
+export type {
+  ServerMetrics,
+  NetworkInfo,
+  AppSource,
+  ConfigField,
+  ServiceRequirement,
+  ServiceDefinition,
+  MountType,
+  MountStatus,
+  MountCredentials,
+  DeploymentStatus,
+};
 
 const API_BASE = '/api';
 
@@ -740,29 +766,7 @@ export interface Server {
   createdAt: string;
 }
 
-export interface NetworkInfo {
-  ipAddress: string | null;
-  macAddress: string | null;
-}
-
-export interface ServerMetrics {
-  cpuPercent: number;
-  memoryUsed: number;
-  memoryTotal: number;
-  diskUsed: number;
-  diskTotal: number;
-  loadAverage: [number, number, number];
-}
-
-export interface AppSource {
-  type: 'binary' | 'git' | 'apt';
-  githubRepo?: string;
-  downloadUrl?: string;
-  checksumUrl?: string;
-  gitUrl?: string;
-  tagPrefix?: string;
-}
-
+// API response version of AppManifest (uses shared types for nested objects)
 export interface AppManifest {
   name: string;
   displayName: string;
@@ -785,31 +789,7 @@ export interface AppManifest {
   singleton?: boolean;
 }
 
-export interface ConfigField {
-  name: string;
-  type: string;
-  label: string;
-  description?: string;
-  default?: unknown;
-  options?: string[];
-  required?: boolean;
-  generated?: boolean;
-  secret?: boolean;
-  inheritFrom?: string;
-}
-
-export interface ServiceRequirement {
-  service: string;
-  optional?: boolean;
-  locality: string;
-}
-
-export interface ServiceDefinition {
-  name: string;
-  port: number;
-  protocol: string;
-}
-
+// API response version of Deployment (string dates, uses DeploymentStatus from shared)
 export interface Deployment {
   id: string;
   serverId: string;
@@ -940,10 +920,7 @@ export interface PaginatedResponse<T> {
   };
 }
 
-// Mount types
-export type MountType = 'nfs' | 'cifs';
-export type MountStatus = 'pending' | 'mounting' | 'mounted' | 'unmounted' | 'error';
-
+// API response versions of Mount types (string dates instead of Date)
 export interface Mount {
   id: string;
   name: string;
@@ -976,12 +953,6 @@ export interface ServerMount {
 export interface ServerMountWithDetails extends ServerMount {
   mount: Mount;
   serverName: string;
-}
-
-export interface MountCredentials {
-  username: string;
-  password: string;
-  domain?: string;
 }
 
 export interface CreateMountData {

@@ -77,6 +77,9 @@ class Agent {
       this.statusInterval = null;
     }
 
+    // Stop all log streams
+    this.executor.stopAllLogStreams();
+
     // Wait for active commands to complete (max 30 seconds)
     const startTime = Date.now();
     const maxWaitMs = 30000;
@@ -192,6 +195,40 @@ class Agent {
           });
           return; // Don't send normal command result
         }
+        case 'streamLogs': {
+          const streamStarted = this.executor.startLogStream(
+            cmd.id, // Use command ID as stream ID
+            cmd.appName,
+            cmd.payload?.logOptions || {},
+            (line) => this.connection.sendLogStreamLine(line),
+            (error) => {
+              this.connection.sendLogStreamStatus({
+                streamId: cmd.id,
+                appName: cmd.appName,
+                status: 'error',
+                message: error,
+              });
+            }
+          );
+
+          this.connection.sendLogStreamStatus({
+            streamId: cmd.id,
+            appName: cmd.appName,
+            status: streamStarted ? 'started' : 'error',
+            message: streamStarted ? undefined : 'Failed to start stream',
+          });
+          return; // Log streaming doesn't send normal command result
+        }
+        case 'stopStreamLogs': {
+          const stopped = this.executor.stopLogStream(cmd.id);
+          this.connection.sendLogStreamStatus({
+            streamId: cmd.id,
+            appName: cmd.appName,
+            status: 'stopped',
+            message: stopped ? undefined : 'Stream not found',
+          });
+          return;
+        }
         default:
           throw new Error(`Unknown action: ${cmd.action}`);
       }
@@ -239,7 +276,35 @@ class Agent {
   }
 }
 
+// Environment validation
+function validateEnvConfig(): void {
+  const isDev = process.env.NODE_ENV !== 'production';
+  const errors: string[] = [];
+
+  // Validate ORCHESTRATOR_URL
+  const orchestratorUrl = process.env.ORCHESTRATOR_URL;
+  if (orchestratorUrl) {
+    try {
+      new URL(orchestratorUrl);
+    } catch {
+      errors.push(`ORCHESTRATOR_URL is not a valid URL: ${orchestratorUrl}`);
+    }
+  }
+
+  // In production, AUTH_TOKEN is required for secure agent-orchestrator communication
+  if (!isDev && !process.env.AUTH_TOKEN) {
+    errors.push('AUTH_TOKEN is required in production for secure agent authentication');
+  }
+
+  if (errors.length > 0) {
+    logger.fatal({ errors }, 'Invalid environment configuration');
+    process.exit(1);
+  }
+}
+
 // Entry point
+validateEnvConfig();
+
 const serverId = process.env.SERVER_ID || 'core';
 const orchestratorUrl = process.env.ORCHESTRATOR_URL || 'http://localhost:3001';
 const authToken = process.env.AUTH_TOKEN || null;

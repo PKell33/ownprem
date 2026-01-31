@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import type { AgentCommand, AgentStatusReport, LogResult, CommandAck, CommandResult } from '@ownprem/shared';
+import type { AgentCommand, AgentStatusReport, LogResult, LogStreamLine, LogStreamStatus, CommandAck, CommandResult } from '@ownprem/shared';
 import logger from './lib/logger.js';
 
 const RECONNECTION_DELAY_MS = 5000;
@@ -119,6 +119,21 @@ export class Connection {
       return;
     }
     this.socket.emit('logs:result', result);
+  }
+
+  sendLogStreamLine(line: LogStreamLine): void {
+    if (!this.socket?.connected) {
+      return; // Silently drop during disconnect
+    }
+    this.socket.emit('logs:stream:line', line);
+  }
+
+  sendLogStreamStatus(status: LogStreamStatus): void {
+    if (!this.socket?.connected) {
+      logger.warn('Cannot send log stream status: not connected');
+      return;
+    }
+    this.socket.emit('logs:stream:status', status);
   }
 
   isConnected(): boolean {
