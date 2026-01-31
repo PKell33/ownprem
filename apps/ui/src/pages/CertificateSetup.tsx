@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Shield, Download, CheckCircle, AlertCircle, Monitor, Apple, Terminal, Sun, Moon, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { useThemeStore } from '../stores/useThemeStore';
+import { showError } from '../lib/toast';
 
 interface CertInfo {
   available: boolean;
@@ -48,6 +49,7 @@ export function CertificateSetup() {
       document.body.removeChild(a);
     } catch (err) {
       console.error('Download failed:', err);
+      showError(err instanceof Error ? err.message : 'Certificate download failed');
     } finally {
       setDownloading(false);
     }

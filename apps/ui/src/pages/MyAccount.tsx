@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { api, SessionInfo, TotpStatus } from '../api/client';
 import { Loader2, AlertCircle, Monitor, Smartphone, Globe, LogOut, XCircle, Lock, Key, Copy, Check, ShieldCheck, ShieldOff, Shield, User } from 'lucide-react';
 import Modal from '../components/Modal';
+import { showError } from '../lib/toast';
 
 export default function MyAccount() {
   const { user } = useAuthStore();
@@ -441,7 +442,7 @@ function SessionManagement() {
       await api.revokeSession(sessionId);
       setSessions(sessions.filter(s => s.id !== sessionId));
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to revoke session');
+      showError(err instanceof Error ? err.message : 'Failed to revoke session');
     } finally {
       setRevoking(null);
     }
@@ -460,7 +461,7 @@ function SessionManagement() {
         setSessions(sessions.filter(s => s.isCurrent));
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to revoke sessions');
+      showError(err instanceof Error ? err.message : 'Failed to revoke sessions');
     } finally {
       setRevoking(null);
     }

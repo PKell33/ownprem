@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { api, UserInfo, AuditLogEntry, Group, GroupWithMembers } from '../api/client';
 import { Plus, Trash2, User, Shield, Loader2, AlertCircle, ScrollText, ChevronLeft, ChevronRight, Filter, Key, Users, UserPlus, UserMinus, ShieldCheck, ShieldOff } from 'lucide-react';
 import Modal from '../components/Modal';
+import { showError } from '../lib/toast';
 
 type TabId = 'users' | 'groups' | 'audit';
 
@@ -108,7 +109,7 @@ function GroupManagement() {
       setGroups([...groups, newGroup]);
       setShowCreateForm(false);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to create group');
+      showError(err instanceof Error ? err.message : 'Failed to create group');
     }
   };
 
@@ -120,13 +121,13 @@ function GroupManagement() {
         setSelectedGroup({ ...selectedGroup, totp_required: totpRequired });
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update group');
+      showError(err instanceof Error ? err.message : 'Failed to update group');
     }
   };
 
   const handleDeleteGroup = async (groupId: string, groupName: string) => {
     if (groupId === 'default') {
-      alert('Cannot delete the default group');
+      showError('Cannot delete the default group');
       return;
     }
     if (!confirm(`Delete group "${groupName}"? Members will be removed from this group.`)) {
@@ -139,7 +140,7 @@ function GroupManagement() {
         setSelectedGroup(null);
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete group');
+      showError(err instanceof Error ? err.message : 'Failed to delete group');
     }
   };
 
@@ -150,7 +151,7 @@ function GroupManagement() {
       await fetchGroupDetails(selectedGroup.id);
       setShowAddMember(false);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to add member');
+      showError(err instanceof Error ? err.message : 'Failed to add member');
     }
   };
 
@@ -160,7 +161,7 @@ function GroupManagement() {
       await api.updateUserGroupRole(selectedGroup.id, userId, role);
       await fetchGroupDetails(selectedGroup.id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update role');
+      showError(err instanceof Error ? err.message : 'Failed to update role');
     }
   };
 
@@ -171,7 +172,7 @@ function GroupManagement() {
       await api.removeUserFromGroup(selectedGroup.id, userId);
       await fetchGroupDetails(selectedGroup.id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to remove member');
+      showError(err instanceof Error ? err.message : 'Failed to remove member');
     }
   };
 
@@ -524,7 +525,7 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
       await api.deleteUser(userId);
       setUsers(users.filter(u => u.id !== userId));
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete user');
+      showError(err instanceof Error ? err.message : 'Failed to delete user');
     }
   };
 
@@ -538,7 +539,7 @@ function UserManagement({ currentUserId }: { currentUserId?: string }) {
       await api.resetUserTotp(userId);
       setUsers(users.map(u => u.id === userId ? { ...u, totp_enabled: false } : u));
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to reset 2FA');
+      showError(err instanceof Error ? err.message : 'Failed to reset 2FA');
     } finally {
       setResettingTotp(null);
     }

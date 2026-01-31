@@ -401,4 +401,130 @@ export const schemas = {
       autoMount: z.boolean().optional(),
     }),
   },
+
+  // Certificate schemas (from certificates.ts)
+  certificates: {
+    issue: z.object({
+      name: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/, 'Name must be alphanumeric with dashes/underscores'),
+      type: z.enum(['server', 'client']),
+      commonName: z.string().min(1).max(255),
+      sans: z.array(z.string()).optional(),
+      validityHours: z.number().min(1).max(8760).optional(), // Max 1 year
+      issuedToServerId: z.string().uuid().optional(),
+      issuedToDeploymentId: z.string().uuid().optional(),
+    }),
+    renew: z.object({
+      validityHours: z.number().min(1).max(8760).optional(),
+    }),
+    revoke: z.object({
+      reason: z.string().min(1).max(500),
+    }),
+  },
+
+  // Caddy HA schemas (from caddyHA.ts)
+  caddyHA: {
+    config: z.object({
+      vipAddress: z.string().ip({ version: 'v4' }),
+      vipInterface: z.string().min(1).max(20).regex(/^[a-z0-9]+$/).optional(),
+      vrrpRouterId: z.number().int().min(1).max(255).optional(),
+      vrrpAuthPass: z.string().min(1).max(32).optional(),
+    }),
+    instance: z.object({
+      deploymentId: z.string().uuid(),
+      vrrpPriority: z.number().int().min(1).max(254).optional(),
+      isPrimary: z.boolean().optional(),
+      adminApiUrl: z.string().url().optional(),
+    }),
+    priority: z.object({
+      priority: z.number().int().min(1).max(254),
+    }),
+    enabled: z.object({
+      enabled: z.boolean(),
+    }),
+  },
+
+  // System schemas (from system.ts)
+  system: {
+    backupFilename: z.object({
+      filename: z.string()
+        .min(1)
+        .max(100)
+        .regex(/^[a-zA-Z0-9_.-]+\.sqlite$/, 'Invalid backup filename'),
+    }),
+    pruneBackups: z.object({
+      keepDays: z.number().int().min(1).max(365),
+    }),
+    exportConfig: z.object({
+      includeUsers: z.coerce.boolean().optional().default(true),
+      includeDeployments: z.coerce.boolean().optional().default(true),
+      includeAuditLog: z.coerce.boolean().optional().default(false),
+    }),
+    importConfig: z.object({
+      config: z.object({
+        version: z.string(),
+        exportedAt: z.string(),
+        orchestrator: z.object({
+          domain: z.string(),
+          dataPath: z.string(),
+        }).optional(),
+        servers: z.array(z.object({
+          id: z.string(),
+          name: z.string(),
+          host: z.string().nullable(),
+          isCore: z.boolean(),
+        })).optional(),
+        deployments: z.array(z.object({
+          id: z.string(),
+          appName: z.string(),
+          serverId: z.string(),
+          groupId: z.string().nullable().optional(),
+          config: z.record(z.unknown()),
+          version: z.string(),
+        })).optional(),
+        users: z.array(z.object({
+          id: z.string(),
+          username: z.string(),
+          isSystemAdmin: z.boolean(),
+        })).optional(),
+        groups: z.array(z.object({
+          id: z.string(),
+          name: z.string(),
+          description: z.string().nullable().optional(),
+          totpRequired: z.boolean(),
+          members: z.array(z.object({
+            userId: z.string(),
+            role: z.string(),
+          })).optional(),
+        })).optional(),
+        proxyRoutes: z.array(z.object({
+          deploymentId: z.string(),
+          path: z.string(),
+          upstream: z.string(),
+        })).optional(),
+        serviceRoutes: z.array(z.object({
+          serviceId: z.string(),
+          serviceName: z.string(),
+          routeType: z.string(),
+          externalPort: z.number().nullable(),
+          externalPath: z.string().nullable(),
+          internalHost: z.string(),
+          internalPort: z.number(),
+        })).optional(),
+      }),
+      options: z.object({
+        overwrite: z.boolean().optional().default(false),
+        regenerateSecrets: z.boolean().optional().default(true),
+        dryRun: z.boolean().optional().default(false),
+      }).optional().default({}),
+    }),
+    restore: z.object({
+      filename: z.string().min(1).max(100),
+    }),
+    validateImport: z.object({
+      config: z.record(z.unknown()),
+    }),
+    syncStatus: z.object({
+      id: z.string().regex(uuidPattern, 'Invalid deployment ID'),
+    }),
+  },
 };

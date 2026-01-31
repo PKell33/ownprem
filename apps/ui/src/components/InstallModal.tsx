@@ -4,6 +4,7 @@ import Modal from './Modal';
 import { useApp, useValidateInstall, useInstallApp } from '../hooks/useApi';
 import { useAuthStore } from '../stores/useAuthStore';
 import { api, Group } from '../api/client';
+import { showError } from '../lib/toast';
 import type { Server, ConfigField } from '../api/client';
 
 interface InstallModalProps {
@@ -61,6 +62,7 @@ export default function InstallModal({ appName, servers, onClose }: InstallModal
         }
       } catch (err) {
         console.error('Failed to fetch groups:', err);
+        showError(err instanceof Error ? err.message : 'Failed to fetch groups');
       }
     };
     fetchGroups();
@@ -80,6 +82,7 @@ export default function InstallModal({ appName, servers, onClose }: InstallModal
       onClose();
     } catch (err) {
       console.error('Install failed:', err);
+      showError(err instanceof Error ? err.message : 'Installation failed');
       setStep('configure');
     }
   };

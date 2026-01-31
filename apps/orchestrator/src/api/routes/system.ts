@@ -1,6 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
 import { createReadStream } from 'fs';
-import { z } from 'zod';
 import { getDb } from '../../db/index.js';
 import { backupService } from '../../services/backupService.js';
 import { configExportService, ConfigExport } from '../../services/configExportService.js';
@@ -8,94 +7,10 @@ import { systemAppsService } from '../../services/systemAppsService.js';
 import { stateRecoveryService } from '../../jobs/stateRecovery.js';
 import { requireAuth, requireSystemAdmin, AuthenticatedRequest } from '../middleware/auth.js';
 import { csrfProtection } from '../middleware/csrf.js';
-import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
+import { validateBody, validateParams, validateQuery, schemas } from '../middleware/validate.js';
 import { createError } from '../middleware/error.js';
 
 const router = Router();
-
-// ===============================
-// Validation Schemas
-// ===============================
-
-const backupFilenameParam = z.object({
-  filename: z.string()
-    .min(1)
-    .max(100)
-    .regex(/^[a-zA-Z0-9_.-]+\.sqlite$/, 'Invalid backup filename'),
-});
-
-const pruneBackupsBody = z.object({
-  keepDays: z.number().int().min(1).max(365),
-});
-
-const exportConfigQuery = z.object({
-  includeUsers: z.coerce.boolean().optional().default(true),
-  includeDeployments: z.coerce.boolean().optional().default(true),
-  includeAuditLog: z.coerce.boolean().optional().default(false),
-});
-
-const importConfigBody = z.object({
-  config: z.object({
-    version: z.string(),
-    exportedAt: z.string(),
-    orchestrator: z.object({
-      domain: z.string(),
-      dataPath: z.string(),
-    }).optional(),
-    servers: z.array(z.object({
-      id: z.string(),
-      name: z.string(),
-      host: z.string().nullable(),
-      isCore: z.boolean(),
-    })).optional(),
-    deployments: z.array(z.object({
-      id: z.string(),
-      appName: z.string(),
-      serverId: z.string(),
-      groupId: z.string().nullable().optional(),
-      config: z.record(z.unknown()),
-      version: z.string(),
-    })).optional(),
-    users: z.array(z.object({
-      id: z.string(),
-      username: z.string(),
-      isSystemAdmin: z.boolean(),
-    })).optional(),
-    groups: z.array(z.object({
-      id: z.string(),
-      name: z.string(),
-      description: z.string().nullable().optional(),
-      totpRequired: z.boolean(),
-      members: z.array(z.object({
-        userId: z.string(),
-        role: z.string(),
-      })).optional(),
-    })).optional(),
-    proxyRoutes: z.array(z.object({
-      deploymentId: z.string(),
-      path: z.string(),
-      upstream: z.string(),
-    })).optional(),
-    serviceRoutes: z.array(z.object({
-      serviceId: z.string(),
-      serviceName: z.string(),
-      routeType: z.string(),
-      externalPort: z.number().nullable(),
-      externalPath: z.string().nullable(),
-      internalHost: z.string(),
-      internalPort: z.number(),
-    })).optional(),
-  }),
-  options: z.object({
-    overwrite: z.boolean().optional().default(false),
-    regenerateSecrets: z.boolean().optional().default(true),
-    dryRun: z.boolean().optional().default(false),
-  }).optional().default({}),
-});
-
-const syncStatusParams = z.object({
-  id: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'Invalid deployment ID'),
-});
 
 // ===============================
 // Database Row Types
@@ -235,7 +150,7 @@ router.get('/backups', requireAuth, requireSystemAdmin, (_req, res, next) => {
 });
 
 // GET /api/system/backups/:filename - Download a backup file
-router.get('/backups/:filename', requireAuth, requireSystemAdmin, validateParams(backupFilenameParam), (req, res, next) => {
+router.get('/backups/:filename', requireAuth, requireSystemAdmin, validateParams(schemas.system.backupFilename), (req, res, next) => {
   try {
     const { filename } = req.params;
     const backup = backupService.getBackup(filename);
@@ -259,7 +174,7 @@ router.get('/backups/:filename', requireAuth, requireSystemAdmin, validateParams
 });
 
 // DELETE /api/system/backups/:filename - Delete a backup
-router.delete('/backups/:filename', requireAuth, requireSystemAdmin, csrfProtection, validateParams(backupFilenameParam), (req, res, next) => {
+router.delete('/backups/:filename', requireAuth, requireSystemAdmin, csrfProtection, validateParams(schemas.system.backupFilename), (req, res, next) => {
   try {
     const { filename } = req.params;
     const deleted = backupService.deleteBackup(filename);
@@ -275,7 +190,7 @@ router.delete('/backups/:filename', requireAuth, requireSystemAdmin, csrfProtect
 });
 
 // POST /api/system/backups/prune - Delete old backups
-router.post('/backups/prune', requireAuth, requireSystemAdmin, csrfProtection, validateBody(pruneBackupsBody), (req, res, next) => {
+router.post('/backups/prune', requireAuth, requireSystemAdmin, csrfProtection, validateBody(schemas.system.pruneBackups), (req, res, next) => {
   try {
     const { keepDays } = req.body;
     const deletedCount = backupService.pruneBackups(keepDays);
@@ -291,9 +206,7 @@ router.post('/backups/prune', requireAuth, requireSystemAdmin, csrfProtection, v
 });
 
 // POST /api/system/restore - Restore from backup (DANGEROUS)
-router.post('/restore', requireAuth, requireSystemAdmin, csrfProtection, validateBody(z.object({
-  filename: z.string().min(1).max(100),
-})), async (req, res, next) => {
+router.post('/restore', requireAuth, requireSystemAdmin, csrfProtection, validateBody(schemas.system.restore), async (req, res, next) => {
   try {
     const { filename } = req.body;
     const backup = backupService.getBackup(filename);
@@ -320,7 +233,7 @@ router.post('/restore', requireAuth, requireSystemAdmin, csrfProtection, validat
 // ===============================
 
 // GET /api/system/export - Export configuration
-router.get('/export', requireAuth, requireSystemAdmin, validateQuery(exportConfigQuery), async (req: AuthenticatedRequest, res, next) => {
+router.get('/export', requireAuth, requireSystemAdmin, validateQuery(schemas.system.exportConfig), async (req: AuthenticatedRequest, res, next) => {
   try {
     // Query params are validated and coerced by Zod
     const query = req.query as unknown as {
@@ -345,9 +258,7 @@ router.get('/export', requireAuth, requireSystemAdmin, validateQuery(exportConfi
 });
 
 // POST /api/system/import/validate - Validate config before import
-router.post('/import/validate', requireAuth, requireSystemAdmin, validateBody(z.object({
-  config: z.record(z.unknown()),
-})), (req, res, next) => {
+router.post('/import/validate', requireAuth, requireSystemAdmin, validateBody(schemas.system.validateImport), (req, res, next) => {
   try {
     const { config } = req.body;
     const result = configExportService.validateConfig(config);
@@ -364,7 +275,7 @@ router.post('/import/validate', requireAuth, requireSystemAdmin, validateBody(z.
 });
 
 // POST /api/system/import - Import configuration
-router.post('/import', requireAuth, requireSystemAdmin, csrfProtection, validateBody(importConfigBody), async (req, res, next) => {
+router.post('/import', requireAuth, requireSystemAdmin, csrfProtection, validateBody(schemas.system.importConfig), async (req, res, next) => {
   try {
     const { config, options } = req.body;
 
@@ -425,7 +336,7 @@ router.post('/recover', requireAuth, requireSystemAdmin, csrfProtection, async (
 });
 
 // POST /api/system/deployments/:id/sync-status - Force sync single deployment status
-router.post('/deployments/:id/sync-status', requireAuth, requireSystemAdmin, csrfProtection, validateParams(syncStatusParams), async (req, res, next) => {
+router.post('/deployments/:id/sync-status', requireAuth, requireSystemAdmin, csrfProtection, validateParams(schemas.system.syncStatus), async (req, res, next) => {
   try {
     const { id } = req.params;
     const result = await stateRecoveryService.syncDeploymentState(id);

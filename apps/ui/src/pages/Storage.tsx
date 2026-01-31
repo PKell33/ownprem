@@ -12,6 +12,7 @@ import {
   useDeleteServerMount,
 } from '../hooks/useApi';
 import { useAuthStore } from '../stores/useAuthStore';
+import { showError } from '../lib/toast';
 import MountCard from '../components/MountCard';
 import Modal from '../components/Modal';
 import type { MountType } from '../api/client';
@@ -60,6 +61,7 @@ export default function Storage() {
       setAddModalOpen(false);
     } catch (err) {
       console.error('Failed to create mount:', err);
+      showError(err instanceof Error ? err.message : 'Failed to create mount');
     }
   };
 
@@ -68,6 +70,7 @@ export default function Storage() {
       await deleteMountMutation.mutateAsync(mountId);
     } catch (err) {
       console.error('Failed to delete mount:', err);
+      showError(err instanceof Error ? err.message : 'Failed to delete mount');
     }
   };
 
@@ -88,6 +91,7 @@ export default function Storage() {
       });
     } catch (err) {
       console.error('Failed to assign mount:', err);
+      showError(err instanceof Error ? err.message : 'Failed to assign mount');
     }
   };
 
@@ -96,6 +100,7 @@ export default function Storage() {
       await mountStorageMutation.mutateAsync(serverMountId);
     } catch (err) {
       console.error('Failed to mount storage:', err);
+      showError(err instanceof Error ? err.message : 'Failed to mount storage');
     }
   };
 
@@ -104,6 +109,7 @@ export default function Storage() {
       await unmountStorageMutation.mutateAsync(serverMountId);
     } catch (err) {
       console.error('Failed to unmount storage:', err);
+      showError(err instanceof Error ? err.message : 'Failed to unmount storage');
     }
   };
 
@@ -112,6 +118,7 @@ export default function Storage() {
       await deleteServerMountMutation.mutateAsync(serverMountId);
     } catch (err) {
       console.error('Failed to delete server mount:', err);
+      showError(err instanceof Error ? err.message : 'Failed to delete server mount');
     }
   };
 

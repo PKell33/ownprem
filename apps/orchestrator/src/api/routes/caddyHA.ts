@@ -1,36 +1,12 @@
 import { Router } from 'express';
-import { z } from 'zod';
 import { caddyHAManager } from '../../services/caddyHAManager.js';
 import { requireAuth, requireSystemAdmin, AuthenticatedRequest } from '../middleware/auth.js';
 import { csrfProtection } from '../middleware/csrf.js';
-import { validateBody, validateParams } from '../middleware/validate.js';
+import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { createError } from '../middleware/error.js';
 import { auditService } from '../../services/auditService.js';
 
 const router = Router();
-
-// Validation schemas
-const haConfigSchema = z.object({
-  vipAddress: z.string().ip({ version: 'v4' }),
-  vipInterface: z.string().min(1).max(20).regex(/^[a-z0-9]+$/).optional(),
-  vrrpRouterId: z.number().int().min(1).max(255).optional(),
-  vrrpAuthPass: z.string().min(1).max(32).optional(),
-});
-
-const instanceSchema = z.object({
-  deploymentId: z.string().uuid(),
-  vrrpPriority: z.number().int().min(1).max(254).optional(),
-  isPrimary: z.boolean().optional(),
-  adminApiUrl: z.string().url().optional(),
-});
-
-const prioritySchema = z.object({
-  priority: z.number().int().min(1).max(254),
-});
-
-const idParam = z.object({
-  id: z.string().uuid(),
-});
 
 // ===============================
 // HA Configuration Routes
@@ -47,7 +23,7 @@ router.get('/config', requireAuth, async (_req, res, next) => {
 });
 
 // POST /api/caddy-ha/config - Create or update HA configuration
-router.post('/config', requireAuth, requireSystemAdmin, csrfProtection, validateBody(haConfigSchema), async (req: AuthenticatedRequest, res, next) => {
+router.post('/config', requireAuth, requireSystemAdmin, csrfProtection, validateBody(schemas.caddyHA.config), async (req: AuthenticatedRequest, res, next) => {
   try {
     const config = await caddyHAManager.configureHA(req.body);
 
@@ -66,7 +42,7 @@ router.post('/config', requireAuth, requireSystemAdmin, csrfProtection, validate
 });
 
 // PUT /api/caddy-ha/config/enabled - Enable or disable HA
-router.put('/config/enabled', requireAuth, requireSystemAdmin, csrfProtection, validateBody(z.object({ enabled: z.boolean() })), async (req: AuthenticatedRequest, res, next) => {
+router.put('/config/enabled', requireAuth, requireSystemAdmin, csrfProtection, validateBody(schemas.caddyHA.enabled), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { enabled } = req.body;
     await caddyHAManager.setHAEnabled(enabled);
@@ -112,7 +88,7 @@ router.get('/instances/primary', requireAuth, async (_req, res, next) => {
 });
 
 // POST /api/caddy-ha/instances - Register a new Caddy instance
-router.post('/instances', requireAuth, requireSystemAdmin, csrfProtection, validateBody(instanceSchema), async (req: AuthenticatedRequest, res, next) => {
+router.post('/instances', requireAuth, requireSystemAdmin, csrfProtection, validateBody(schemas.caddyHA.instance), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { deploymentId, ...options } = req.body;
     const instance = await caddyHAManager.registerInstance(deploymentId, options);
@@ -132,7 +108,7 @@ router.post('/instances', requireAuth, requireSystemAdmin, csrfProtection, valid
 });
 
 // GET /api/caddy-ha/instances/:id - Get instance details
-router.get('/instances/:id', requireAuth, validateParams(idParam), async (req, res, next) => {
+router.get('/instances/:id', requireAuth, validateParams(schemas.idParam), async (req, res, next) => {
   try {
     const instance = await caddyHAManager.getInstance(req.params.id);
     if (!instance) {
@@ -145,7 +121,7 @@ router.get('/instances/:id', requireAuth, validateParams(idParam), async (req, r
 });
 
 // PUT /api/caddy-ha/instances/:id/priority - Update instance priority
-router.put('/instances/:id/priority', requireAuth, requireSystemAdmin, csrfProtection, validateParams(idParam), validateBody(prioritySchema), async (req: AuthenticatedRequest, res, next) => {
+router.put('/instances/:id/priority', requireAuth, requireSystemAdmin, csrfProtection, validateParams(schemas.idParam), validateBody(schemas.caddyHA.priority), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { priority } = req.body;
     await caddyHAManager.setInstancePriority(req.params.id, priority);
@@ -165,7 +141,7 @@ router.put('/instances/:id/priority', requireAuth, requireSystemAdmin, csrfProte
 });
 
 // POST /api/caddy-ha/instances/:id/promote - Promote instance to primary
-router.post('/instances/:id/promote', requireAuth, requireSystemAdmin, csrfProtection, validateParams(idParam), async (req: AuthenticatedRequest, res, next) => {
+router.post('/instances/:id/promote', requireAuth, requireSystemAdmin, csrfProtection, validateParams(schemas.idParam), async (req: AuthenticatedRequest, res, next) => {
   try {
     await caddyHAManager.promoteInstance(req.params.id);
 
@@ -184,7 +160,7 @@ router.post('/instances/:id/promote', requireAuth, requireSystemAdmin, csrfProte
 });
 
 // DELETE /api/caddy-ha/instances/:id - Unregister an instance
-router.delete('/instances/:id', requireAuth, requireSystemAdmin, csrfProtection, validateParams(idParam), async (req: AuthenticatedRequest, res, next) => {
+router.delete('/instances/:id', requireAuth, requireSystemAdmin, csrfProtection, validateParams(schemas.idParam), async (req: AuthenticatedRequest, res, next) => {
   try {
     await caddyHAManager.unregisterInstance(req.params.id);
 

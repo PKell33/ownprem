@@ -3,6 +3,7 @@ import { Plus, Copy, Check, Terminal, AlertTriangle } from 'lucide-react';
 import { useServers, useDeployments, useApps, useStartDeployment, useStopDeployment, useRestartDeployment, useUninstallDeployment } from '../hooks/useApi';
 import { useAuthStore } from '../stores/useAuthStore';
 import { api } from '../api/client';
+import { showError } from '../lib/toast';
 import ServerCard from '../components/ServerCard';
 import Modal from '../components/Modal';
 
@@ -33,6 +34,7 @@ export default function Servers() {
       refetch();
     } catch (err) {
       console.error('Failed to add server:', err);
+      showError(err instanceof Error ? err.message : 'Failed to add server');
     }
   };
 
@@ -42,6 +44,7 @@ export default function Servers() {
       refetch();
     } catch (err) {
       console.error('Failed to delete server:', err);
+      showError(err instanceof Error ? err.message : 'Failed to delete server');
     }
   };
 
@@ -58,6 +61,7 @@ export default function Servers() {
       setSetupModalOpen(true);
     } catch (err) {
       console.error('Failed to regenerate token:', err);
+      showError(err instanceof Error ? err.message : 'Failed to regenerate token');
     }
   };
 

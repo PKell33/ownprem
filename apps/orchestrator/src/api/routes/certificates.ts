@@ -6,28 +6,8 @@ import { validateBody, validateParams, schemas } from '../middleware/validate.js
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { csrfProtection } from '../middleware/csrf.js';
 import { auditService } from '../../services/auditService.js';
-import { z } from 'zod';
 
 const router = Router();
-
-// Validation schemas
-const certificateSchemas = {
-  issue: z.object({
-    name: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/, 'Name must be alphanumeric with dashes/underscores'),
-    type: z.enum(['server', 'client']),
-    commonName: z.string().min(1).max(255),
-    sans: z.array(z.string()).optional(),
-    validityHours: z.number().min(1).max(8760).optional(), // Max 1 year
-    issuedToServerId: z.string().uuid().optional(),
-    issuedToDeploymentId: z.string().uuid().optional(),
-  }),
-  renew: z.object({
-    validityHours: z.number().min(1).max(8760).optional(),
-  }),
-  revoke: z.object({
-    reason: z.string().min(1).max(500),
-  }),
-};
 
 // Helper: Check if user can manage certificates (system admin only)
 function canManageCertificates(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
@@ -101,7 +81,7 @@ router.get('/ca/status', requireAuth, async (req, res, next) => {
 });
 
 // POST /api/certificates - Issue a new certificate
-router.post('/', requireAuth, canManageCertificates, validateBody(certificateSchemas.issue), async (req: AuthenticatedRequest, res, next) => {
+router.post('/', requireAuth, canManageCertificates, validateBody(schemas.certificates.issue), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { name, type, commonName, sans, validityHours, issuedToServerId, issuedToDeploymentId } = req.body;
 
@@ -204,7 +184,7 @@ router.get('/:id/download', requireAuth, canManageCertificates, validateParams(s
 });
 
 // POST /api/certificates/:id/renew - Renew a certificate
-router.post('/:id/renew', requireAuth, canManageCertificates, validateParams(schemas.idParam), validateBody(certificateSchemas.renew), async (req: AuthenticatedRequest, res, next) => {
+router.post('/:id/renew', requireAuth, canManageCertificates, validateParams(schemas.idParam), validateBody(schemas.certificates.renew), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { validityHours } = req.body;
     const oldCertId = req.params.id;
@@ -238,7 +218,7 @@ router.post('/:id/renew', requireAuth, canManageCertificates, validateParams(sch
 });
 
 // POST /api/certificates/:id/revoke - Revoke a certificate
-router.post('/:id/revoke', requireAuth, canManageCertificates, validateParams(schemas.idParam), validateBody(certificateSchemas.revoke), async (req: AuthenticatedRequest, res, next) => {
+router.post('/:id/revoke', requireAuth, canManageCertificates, validateParams(schemas.idParam), validateBody(schemas.certificates.revoke), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { reason } = req.body;
 

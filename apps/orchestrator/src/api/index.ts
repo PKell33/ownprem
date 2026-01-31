@@ -172,6 +172,26 @@ export function createApi(): express.Application {
   // Certificate routes (unauthenticated - needed before users can trust the site)
   app.use('/api/certificate', certificateRouter);
 
+  // ==========================================================================
+  // CSRF Protection Strategy
+  // ==========================================================================
+  // CSRF protection is intentionally applied at different levels:
+  //
+  // App-level CSRF (via csrfProtection middleware):
+  //   - /api/servers, /api/deployments, /api/mounts, /api/certificates
+  //   - All routes in these routers require CSRF tokens for state-changing requests
+  //
+  // Per-route CSRF (applied within route handlers):
+  //   - /api/system - Mixed read/write endpoints, CSRF on write operations only
+  //   - /api/caddy-ha - Mixed read/write endpoints, CSRF on write operations only
+  //
+  // No CSRF required (read-only endpoints):
+  //   - /api/apps - App manifest listing (GET only)
+  //   - /api/services - Service discovery (GET only)
+  //   - /api/commands - Command log viewing (GET only)
+  //   - /api/audit-logs - Audit log viewing (GET only)
+  // ==========================================================================
+
   // Protected API routes - use devBypassAuth for development convenience, csrfProtection for CSRF defense
   app.use('/api/servers', devBypassAuth, csrfProtection, serversRouter);
   app.use('/api/apps', devBypassAuth, appsRouter); // Read-only, no CSRF needed

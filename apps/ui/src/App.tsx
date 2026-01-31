@@ -14,6 +14,7 @@ import { CertificateSetup } from './pages/CertificateSetup';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAuthStore } from './stores/useAuthStore';
+import { Toaster } from './components/Toaster';
 
 // Route that requires authentication but allows users who need TOTP setup
 function TotpSetupRoute() {
@@ -44,27 +45,30 @@ function App() {
   }, [isAuthenticated, connect, disconnect]);
 
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/certificate" element={<CertificateSetup />} />
-      <Route path="/setup-2fa" element={<TotpSetupRoute />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <Layout />
-          </ProtectedRoute>
-        }
-      >
-        <Route index element={<Dashboard />} />
-        <Route path="servers" element={<Servers />} />
-        <Route path="apps" element={<Apps />} />
-        <Route path="storage" element={<Storage />} />
-        <Route path="account" element={<MyAccount />} />
-        <Route path="settings" element={<Settings />} />
-        <Route path="admin" element={<Admin />} />
-      </Route>
-    </Routes>
+    <>
+      <Toaster />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/certificate" element={<CertificateSetup />} />
+        <Route path="/setup-2fa" element={<TotpSetupRoute />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <Layout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Dashboard />} />
+          <Route path="servers" element={<Servers />} />
+          <Route path="apps" element={<Apps />} />
+          <Route path="storage" element={<Storage />} />
+          <Route path="account" element={<MyAccount />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="admin" element={<Admin />} />
+        </Route>
+      </Routes>
+    </>
   );
 }
 
