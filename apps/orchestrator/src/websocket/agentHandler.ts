@@ -20,6 +20,7 @@ import { isValidAgentAuth } from '@ownprem/shared';
 // Import from extracted modules
 import type { AgentConnection } from './agentTypes.js';
 import { HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, SHUTDOWN_TIMEOUT, getNextConnectionGeneration } from './agentTypes.js';
+import type { ZodSchema } from 'zod';
 import {
   validateWithSchema,
   AgentStatusReportSchema,
@@ -32,6 +33,35 @@ import {
 import { authenticateAgent, hashToken } from './agentAuth.js';
 import { handleStatusReport } from './statusHandler.js';
 import { handleBrowserClient } from './browserClient.js';
+
+/**
+ * Helper to register a validated socket event handler.
+ * Reduces boilerplate for the repeated pattern of validate -> handle.
+ *
+ * @param socket - The socket to register the handler on
+ * @param event - Event name
+ * @param schema - Zod schema for validation
+ * @param serverId - Server ID for logging
+ * @param handler - Handler function to call with validated data
+ */
+function registerValidatedHandler<T>(
+  socket: Socket,
+  event: string,
+  schema: ZodSchema<T>,
+  serverId: string,
+  handler: (data: T) => void | Promise<void>
+): void {
+  socket.on(event, async (rawData: unknown) => {
+    const data = validateWithSchema(schema, rawData, event, serverId);
+    if (!data) return; // Invalid payload, already logged by validateWithSchema
+
+    try {
+      await handler(data as T);
+    } catch (err) {
+      wsLogger.error({ serverId, event, err }, `Error handling ${event}`);
+    }
+  });
+}
 
 import {
   handleLogResult,
@@ -211,64 +241,39 @@ export function setupAgentHandler(io: SocketServer): void {
       }
     });
 
-    // Handle status reports from agent (with Zod validation)
-    socket.on('status', (rawReport: unknown) => {
-      const report = validateWithSchema(AgentStatusReportSchema, rawReport, 'status', serverId);
-      if (!report) return; // Invalid payload, already logged
-
+    // Handle status reports from agent
+    registerValidatedHandler(socket, 'status', AgentStatusReportSchema, serverId, (report) => {
       const conn = connectedAgents.get(serverId);
       if (conn) {
         conn.lastSeen = new Date();
       }
-      // Cast through unknown since Zod's passthrough() type doesn't perfectly match
-      handleStatusReport(io, serverId, report as unknown as AgentStatusReport).catch(err => {
-        wsLogger.error({ serverId, err }, 'Error handling status report');
-      });
+      return handleStatusReport(io, serverId, report as unknown as AgentStatusReport);
     });
 
-    // Handle command acknowledgment (with Zod validation)
-    socket.on('command:ack', (rawAck: unknown) => {
-      const ack = validateWithSchema(CommandAckSchema, rawAck, 'command:ack', serverId);
-      if (!ack) return;
-
+    // Handle command acknowledgment
+    registerValidatedHandler(socket, 'command:ack', CommandAckSchema, serverId, (ack) => {
       handleCommandAck(serverId, ack as CommandAck);
     });
 
-    // Handle command results (with Zod validation)
-    socket.on('command:result', (rawResult: unknown) => {
-      const result = validateWithSchema(CommandResultSchema, rawResult, 'command:result', serverId);
-      if (!result) return;
-
-      // Get connection generation to detect stale results
+    // Handle command results
+    registerValidatedHandler(socket, 'command:result', CommandResultSchema, serverId, (result) => {
       const conn = connectedAgents.get(serverId);
       const connectionGeneration = conn?.connectionGeneration;
-
-      handleCommandResult(io, serverId, result as CommandResult, connectionGeneration).catch(err => {
-        wsLogger.error({ serverId, commandId: (result as CommandResult).commandId, err }, 'Error handling command result');
-      });
+      return handleCommandResult(io, serverId, result as CommandResult, connectionGeneration);
     });
 
-    // Handle log results (with Zod validation)
-    socket.on('logs:result', (rawResult: unknown) => {
-      const result = validateWithSchema(LogResultSchema, rawResult, 'logs:result', serverId);
-      if (!result) return;
-
+    // Handle log results
+    registerValidatedHandler(socket, 'logs:result', LogResultSchema, serverId, (result) => {
       handleLogResult(serverId, result as LogResult);
     });
 
-    // Handle log stream lines (with Zod validation)
-    socket.on('logs:stream:line', (rawLine: unknown) => {
-      const line = validateWithSchema(LogStreamLineSchema, rawLine, 'logs:stream:line', serverId);
-      if (!line) return;
-
+    // Handle log stream lines
+    registerValidatedHandler(socket, 'logs:stream:line', LogStreamLineSchema, serverId, (line) => {
       handleLogStreamLine(line as LogStreamLine);
     });
 
-    // Handle log stream status (with Zod validation)
-    socket.on('logs:stream:status', (rawStatus: unknown) => {
-      const status = validateWithSchema(LogStreamStatusSchema, rawStatus, 'logs:stream:status', serverId);
-      if (!status) return;
-
+    // Handle log stream status
+    registerValidatedHandler(socket, 'logs:stream:status', LogStreamStatusSchema, serverId, (status) => {
       handleLogStreamStatus(serverId, status as LogStreamStatus);
     });
 

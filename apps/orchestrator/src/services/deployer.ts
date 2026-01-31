@@ -79,7 +79,7 @@ export class Deployer {
     userConfig: Record<string, unknown> = {},
     version?: string,
     groupId?: string,
-    serviceBindings?: Record<string, string>
+    _serviceBindings?: Record<string, string>
   ): Promise<Deployment> {
     const db = getDb();
 
@@ -94,37 +94,20 @@ export class Deployer {
     const resolvedConfig = await dependencyResolver.resolve(manifest, serverId, userConfig);
 
     // Generate secrets for fields marked as generated
-    const secrets: Record<string, string> = {};
-    for (const field of manifest.configSchema) {
-      if (field.generated && field.secret) {
-        if (field.type === 'password') {
-          secrets[field.name] = secretsManager.generatePassword();
-        } else if (field.name.toLowerCase().includes('user')) {
-          secrets[field.name] = secretsManager.generateUsername(appName);
-        } else {
-          secrets[field.name] = secretsManager.generatePassword(16);
-        }
-      }
-    }
+    const secrets = this.generateSecrets(manifest, appName);
 
     // Create deployment record
     const deploymentId = uuidv4();
     const appVersion = version || manifest.version;
-
-    // Use default group if none specified
     const finalGroupId = groupId || 'default';
 
-    // Get server info for config rendering (needed before transaction)
+    // Get server info for config rendering
     const server = db.prepare('SELECT host, is_core FROM servers WHERE id = ?').get(serverId) as ServerRow;
     const serverHost = server.is_core ? '127.0.0.1' : (server.host || '127.0.0.1');
 
     // Compensating transactions for rollback on failure
     const compensations: CompensationFn[] = [];
 
-    /**
-     * Execute all compensations in reverse order.
-     * Logs errors but doesn't throw to ensure all compensations run.
-     */
     const rollback = async (error: Error): Promise<never> => {
       logger.error({ deploymentId, appName, err: error }, 'Install failed, rolling back');
       for (const compensate of compensations.reverse()) {
@@ -138,18 +121,8 @@ export class Deployer {
     };
 
     try {
-      // Step 1: Create deployment record and secrets (atomic transaction)
-      runInTransaction(() => {
-        db.prepare(`
-          INSERT INTO deployments (id, server_id, app_name, group_id, version, config, status, installed_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 'installing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `).run(deploymentId, serverId, appName, finalGroupId, appVersion, JSON.stringify(resolvedConfig));
-
-        // Store secrets synchronously within transaction
-        if (Object.keys(secrets).length > 0) {
-          secretsManager.storeSecretsSync(deploymentId, secrets);
-        }
-      });
+      // Step 1: Create deployment record and secrets
+      this.createDeploymentRecord(db, deploymentId, serverId, appName, finalGroupId, appVersion, resolvedConfig, secrets);
       compensations.push(async () => {
         logger.debug({ deploymentId }, 'Rolling back: deleting deployment and secrets');
         runInTransaction(() => {
@@ -158,151 +131,17 @@ export class Deployer {
         });
       });
 
-      // Render config files
-      const configFiles = await configRenderer.renderAppConfigs(manifest, resolvedConfig, secrets);
+      // Step 2: Render config files and prepare agent payload
+      const configFiles = await this.renderAppConfiguration(manifest, appName, deploymentId, resolvedConfig, secrets);
+      const { env, metadata } = this.buildInstallPayload(manifest, appName, appVersion, serverId, resolvedConfig, secrets);
 
-      // Add install script
-      const installScript = configRenderer.renderInstallScript(manifest, resolvedConfig);
-      if (installScript) {
-        configFiles.push(installScript);
-      }
+      // Step 3: Execute install on agent
+      await this.executeInstallOnAgent(serverId, appName, deploymentId, appVersion, configFiles, env, metadata);
 
-      // Add configure script
-      const configureScript = configRenderer.renderConfigureScript(manifest);
-      if (configureScript) {
-        configFiles.push(configureScript);
-      }
-
-      // Add uninstall script
-      const uninstallScript = configRenderer.renderUninstallScript(manifest);
-      if (uninstallScript) {
-        configFiles.push(uninstallScript);
-      }
-
-      // Add start script
-      const startScript = configRenderer.renderStartScript(manifest);
-      if (startScript) {
-        configFiles.push(startScript);
-      }
-
-      // Add stop script
-      const stopScript = configRenderer.renderStopScript(manifest);
-      if (stopScript) {
-        configFiles.push(stopScript);
-      }
-
-      // For Caddy deployments, include the CA root certificate so it can trust step-ca
-      if (appName === 'ownprem-caddy') {
-        const caCert = await this.getCACertificate();
-        if (caCert) {
-          configFiles.push({
-            path: '/etc/caddy/ca-root.crt',
-            content: caCert,
-            mode: '0644',
-          });
-          logger.info({ deploymentId }, 'Including CA root certificate for Caddy deployment');
-        }
-      }
-
-      // Build environment variables for install
-      const env: Record<string, string> = {
-        SERVER_ID: serverId,
-        APP_NAME: appName,
-        APP_VERSION: appVersion,
-      };
-
-      // Build metadata for the app (used by agent for status reporting and privileged setup)
-      const metadata: Record<string, unknown> = {
-        name: appName,
-        displayName: manifest.displayName,
-        version: appVersion,
-        serviceName: manifest.logging?.serviceName || appName,
-        // Privileged setup info
-        serviceUser: manifest.serviceUser,
-        serviceGroup: manifest.serviceGroup || manifest.serviceUser,
-        dataDirectories: manifest.dataDirectories,
-        capabilities: manifest.capabilities,
-      };
-
-      // Add non-secret config to env
-      for (const [key, value] of Object.entries(resolvedConfig)) {
-        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-          env[key.toUpperCase()] = String(value);
-        }
-      }
-
-      // Add secrets to env
-      for (const [key, value] of Object.entries(secrets)) {
-        env[key.toUpperCase()] = value;
-      }
-
-      // Step 2: Send install command to agent and wait for completion
-      // We must await this to ensure install succeeds before registering routes,
-      // otherwise a failed install would leave orphaned proxy routes
-      const commandId = uuidv4();
-      logger.info({ deploymentId, appName, serverId }, 'Sending install command to agent');
-
-      let installResult;
-      try {
-        installResult = await sendCommandAndWait(serverId, {
-          id: commandId,
-          action: 'install',
-          appName,
-          payload: {
-            version: appVersion,
-            files: configFiles,
-            env,
-            metadata,
-          },
-        }, deploymentId);
-      } catch (err) {
-        // Agent disconnected or command failed
-        throw createTypedError(
-          ErrorCodes.COMMAND_FAILED,
-          `Install command failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-
-      if (installResult.status !== 'success') {
-        throw createTypedError(
-          ErrorCodes.COMMAND_FAILED,
-          `Install failed on agent: ${installResult.message || 'Unknown error'}`
-        );
-      }
-
-      logger.info({ deploymentId, appName }, 'Install command completed successfully');
-
-      // Step 3: Register services and their proxy routes
-      const registeredServiceIds: string[] = [];
-      for (const serviceDef of manifest.provides || []) {
-        const service = await serviceRegistry.registerService(deploymentId, serviceDef.name, serverId, serviceDef.port);
-        registeredServiceIds.push(service.id);
-
-        // Register service route through Caddy proxy
-        await proxyManager.registerServiceRoute(
-          service.id,
-          serviceDef.name,
-          serviceDef,
-          serverHost,
-          serviceDef.port
-        );
-      }
-      if (registeredServiceIds.length > 0) {
-        compensations.push(async () => {
-          logger.debug({ deploymentId }, 'Rolling back: unregistering services and routes');
-          await proxyManager.unregisterServiceRoutesByDeployment(deploymentId);
-          serviceRegistry.unregisterServicesSync(deploymentId);
-        });
-      }
-
-      // Step 4: Register proxy route if app has webui
-      if (manifest.webui?.enabled) {
-        await proxyManager.registerRoute(deploymentId, manifest, serverHost);
-        compensations.push(async () => {
-          logger.debug({ deploymentId }, 'Rolling back: unregistering web UI route');
-          await proxyManager.unregisterRoute(deploymentId);
-        });
-      }
+      // Step 4: Register services and routes
+      const hasRegisteredServices = await this.registerDeploymentRoutes(
+        deploymentId, manifest, serverId, serverHost, compensations
+      );
 
       // Step 5: Update Caddy config and reload
       const caddySuccess = await proxyManager.updateAndReload();
@@ -318,22 +157,265 @@ export class Deployer {
         details: { appName, serverId, version: appVersion },
       });
 
-      // Auto-register Caddy deployments with HA manager
-      if (appName === 'ownprem-caddy') {
-        try {
-          await caddyHAManager.registerInstance(deploymentId, {
-            adminApiUrl: `http://${serverHost}:2019`,
-          });
-          logger.info({ deploymentId }, 'Auto-registered Caddy instance with HA manager');
-        } catch (err) {
-          // Don't fail deployment if HA registration fails
-          logger.warn({ deploymentId, err }, 'Failed to auto-register Caddy instance with HA manager');
-        }
-      }
+      // Step 6: Handle Caddy-specific HA registration
+      await this.handleCaddyHARegistration(appName, deploymentId, 'register', serverHost);
 
       return (await this.getDeployment(deploymentId))!;
     } catch (error) {
       return rollback(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * Generate secrets for fields marked as generated in the manifest.
+   */
+  private generateSecrets(manifest: AppManifest, appName: string): Record<string, string> {
+    const secrets: Record<string, string> = {};
+    for (const field of manifest.configSchema) {
+      if (field.generated && field.secret) {
+        if (field.type === 'password') {
+          secrets[field.name] = secretsManager.generatePassword();
+        } else if (field.name.toLowerCase().includes('user')) {
+          secrets[field.name] = secretsManager.generateUsername(appName);
+        } else {
+          secrets[field.name] = secretsManager.generatePassword(16);
+        }
+      }
+    }
+    return secrets;
+  }
+
+  /**
+   * Create deployment record and store secrets in a single transaction.
+   */
+  private createDeploymentRecord(
+    db: ReturnType<typeof getDb>,
+    deploymentId: string,
+    serverId: string,
+    appName: string,
+    groupId: string,
+    version: string,
+    config: Record<string, unknown>,
+    secrets: Record<string, string>
+  ): void {
+    runInTransaction(() => {
+      db.prepare(`
+        INSERT INTO deployments (id, server_id, app_name, group_id, version, config, status, installed_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'installing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).run(deploymentId, serverId, appName, groupId, version, JSON.stringify(config));
+
+      if (Object.keys(secrets).length > 0) {
+        secretsManager.storeSecretsSync(deploymentId, secrets);
+      }
+    });
+  }
+
+  /**
+   * Render all configuration files for the app including scripts and certificates.
+   */
+  private async renderAppConfiguration(
+    manifest: AppManifest,
+    appName: string,
+    deploymentId: string,
+    resolvedConfig: Record<string, unknown>,
+    secrets: Record<string, string>
+  ): Promise<ConfigFile[]> {
+    const configFiles = await configRenderer.renderAppConfigs(manifest, resolvedConfig, secrets);
+
+    // Add lifecycle scripts using array pattern to reduce repetition
+    const scripts = [
+      configRenderer.renderInstallScript(manifest, resolvedConfig),
+      configRenderer.renderConfigureScript(manifest),
+      configRenderer.renderUninstallScript(manifest),
+      configRenderer.renderStartScript(manifest),
+      configRenderer.renderStopScript(manifest),
+    ];
+    configFiles.push(...scripts.filter((s): s is ConfigFile => s !== null));
+
+    // For Caddy deployments, include the CA root certificate
+    if (appName === 'ownprem-caddy') {
+      const caCert = await this.getCACertificate();
+      if (caCert) {
+        configFiles.push({
+          path: '/etc/caddy/ca-root.crt',
+          content: caCert,
+          mode: '0644',
+        });
+        logger.info({ deploymentId }, 'Including CA root certificate for Caddy deployment');
+      }
+    }
+
+    return configFiles;
+  }
+
+  /**
+   * Build environment variables and metadata for the install command.
+   */
+  private buildInstallPayload(
+    manifest: AppManifest,
+    appName: string,
+    appVersion: string,
+    serverId: string,
+    resolvedConfig: Record<string, unknown>,
+    secrets: Record<string, string>
+  ): { env: Record<string, string>; metadata: Record<string, unknown> } {
+    const env: Record<string, string> = {
+      SERVER_ID: serverId,
+      APP_NAME: appName,
+      APP_VERSION: appVersion,
+    };
+
+    // Add non-secret config to env
+    for (const [key, value] of Object.entries(resolvedConfig)) {
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        env[key.toUpperCase()] = String(value);
+      }
+    }
+
+    // Add secrets to env
+    for (const [key, value] of Object.entries(secrets)) {
+      env[key.toUpperCase()] = value;
+    }
+
+    const metadata: Record<string, unknown> = {
+      name: appName,
+      displayName: manifest.displayName,
+      version: appVersion,
+      serviceName: manifest.logging?.serviceName || appName,
+      serviceUser: manifest.serviceUser,
+      serviceGroup: manifest.serviceGroup || manifest.serviceUser,
+      dataDirectories: manifest.dataDirectories,
+      capabilities: manifest.capabilities,
+    };
+
+    return { env, metadata };
+  }
+
+  /**
+   * Send install command to agent and wait for completion.
+   */
+  private async executeInstallOnAgent(
+    serverId: string,
+    appName: string,
+    deploymentId: string,
+    appVersion: string,
+    configFiles: ConfigFile[],
+    env: Record<string, string>,
+    metadata: Record<string, unknown>
+  ): Promise<void> {
+    const commandId = uuidv4();
+    logger.info({ deploymentId, appName, serverId }, 'Sending install command to agent');
+
+    let installResult;
+    try {
+      installResult = await sendCommandAndWait(serverId, {
+        id: commandId,
+        action: 'install',
+        appName,
+        payload: {
+          version: appVersion,
+          files: configFiles,
+          env,
+          metadata,
+        },
+      }, deploymentId);
+    } catch (err) {
+      throw createTypedError(
+        ErrorCodes.COMMAND_FAILED,
+        `Install command failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    if (installResult.status !== 'success') {
+      throw createTypedError(
+        ErrorCodes.COMMAND_FAILED,
+        `Install failed on agent: ${installResult.message || 'Unknown error'}`
+      );
+    }
+
+    logger.info({ deploymentId, appName }, 'Install command completed successfully');
+  }
+
+  /**
+   * Register services and proxy routes for the deployment.
+   * Returns true if any services were registered.
+   */
+  private async registerDeploymentRoutes(
+    deploymentId: string,
+    manifest: AppManifest,
+    serverId: string,
+    serverHost: string,
+    compensations: CompensationFn[]
+  ): Promise<boolean> {
+    // Register services and their proxy routes
+    const registeredServiceIds: string[] = [];
+    for (const serviceDef of manifest.provides || []) {
+      const service = await serviceRegistry.registerService(deploymentId, serviceDef.name, serverId, serviceDef.port);
+      registeredServiceIds.push(service.id);
+
+      await proxyManager.registerServiceRoute(
+        service.id,
+        serviceDef.name,
+        serviceDef,
+        serverHost,
+        serviceDef.port
+      );
+    }
+
+    if (registeredServiceIds.length > 0) {
+      compensations.push(async () => {
+        logger.debug({ deploymentId }, 'Rolling back: unregistering services and routes');
+        await proxyManager.unregisterServiceRoutesByDeployment(deploymentId);
+        serviceRegistry.unregisterServicesSync(deploymentId);
+      });
+    }
+
+    // Register web UI route if enabled
+    if (manifest.webui?.enabled) {
+      await proxyManager.registerRoute(deploymentId, manifest, serverHost);
+      compensations.push(async () => {
+        logger.debug({ deploymentId }, 'Rolling back: unregistering web UI route');
+        await proxyManager.unregisterRoute(deploymentId);
+      });
+    }
+
+    return registeredServiceIds.length > 0 || !!manifest.webui?.enabled;
+  }
+
+  /**
+   * Handle Caddy HA manager registration/unregistration.
+   * This is a best-effort operation - failures don't fail the deployment.
+   * @param serverHost - Required for 'register', not needed for 'unregister'
+   */
+  private async handleCaddyHARegistration(
+    appName: string,
+    deploymentId: string,
+    action: 'register' | 'unregister',
+    serverHost?: string
+  ): Promise<void> {
+    if (appName !== 'ownprem-caddy') {
+      return;
+    }
+
+    try {
+      if (action === 'register') {
+        if (!serverHost) {
+          logger.warn({ deploymentId }, 'Cannot register Caddy instance: serverHost not provided');
+          return;
+        }
+        await caddyHAManager.registerInstance(deploymentId, {
+          adminApiUrl: `http://${serverHost}:2019`,
+        });
+        logger.info({ deploymentId }, 'Auto-registered Caddy instance with HA manager');
+      } else {
+        const instance = await caddyHAManager.getInstanceByDeployment(deploymentId);
+        if (instance) {
+          await caddyHAManager.unregisterInstance(instance.id);
+          logger.info({ deploymentId }, 'Unregistered Caddy instance from HA manager');
+        }
+      }
+    } catch (err) {
+      logger.warn({ deploymentId, err }, `Failed to ${action} Caddy instance with HA manager`);
     }
   }
 
@@ -430,30 +512,28 @@ export class Deployer {
     setDeploymentStatus(deploymentId, 'uninstalling');
 
     try {
-      // Send uninstall command
+      // Send uninstall command and wait for completion before cleaning up DB
+      // This prevents race conditions where DB is cleaned before agent finishes
       const commandId = uuidv4();
-      sendCommand(deployment.serverId, {
-        id: commandId,
-        action: 'uninstall',
-        appName: deployment.appName,
-      }, deploymentId);
+      try {
+        await sendCommandAndWait(deployment.serverId, {
+          id: commandId,
+          action: 'uninstall',
+          appName: deployment.appName,
+        }, deploymentId);
+        logger.info({ deploymentId, appName: deployment.appName }, 'Uninstall command completed');
+      } catch (cmdErr) {
+        // Log but continue with cleanup - the app files may already be partially removed
+        // and we need to clean up routes/DB to avoid orphaned records
+        logger.warn({ deploymentId, err: cmdErr }, 'Uninstall command failed, continuing with cleanup');
+      }
 
       // Remove proxy routes (DB operations, done before transaction to use async proxyManager)
       await proxyManager.unregisterRoute(deploymentId);
       await proxyManager.unregisterServiceRoutesByDeployment(deploymentId);
 
       // Unregister Caddy instance from HA manager if this is a Caddy deployment
-      if (deployment.appName === 'ownprem-caddy') {
-        try {
-          const instance = await caddyHAManager.getInstanceByDeployment(deploymentId);
-          if (instance) {
-            await caddyHAManager.unregisterInstance(instance.id);
-            logger.info({ deploymentId }, 'Unregistered Caddy instance from HA manager');
-          }
-        } catch (err) {
-          logger.warn({ deploymentId, err }, 'Failed to unregister Caddy instance from HA manager');
-        }
-      }
+      await this.handleCaddyHARegistration(deployment.appName, deploymentId, 'unregister');
 
       // Atomic transaction: services + secrets + deployment deletion
       runInTransaction(() => {

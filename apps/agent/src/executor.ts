@@ -13,10 +13,19 @@ import logger from './lib/logger.js';
 // Import from extracted modules
 import { ALLOWED_PATH_PREFIXES, SCRIPT_TIMEOUT_MS } from './executor/executorTypes.js';
 import { validatePath, validateOwner, validateMode } from './executor/validation.js';
+
 import { getLogs as getLogsInternal, LogStreamManager } from './executor/logManager.js';
 import { mountStorage as mountStorageInternal, unmountStorage as unmountStorageInternal, checkMount as checkMountInternal } from './executor/mountManager.js';
 import { systemctl as systemctlInternal, configureKeepalived as configureKeepalivedInternal, checkKeepalived as checkKeepalivedInternal, stopAllDevProcesses } from './executor/serviceManager.js';
 import { spawnScript, killProcessGroup as killProcessGroupUtil, INSTALL_SCRIPT_LIMITS, DEFAULT_SCRIPT_LIMITS, type ResourceLimits } from './executor/processRunner.js';
+
+/**
+ * Whitelist of environment variables safe to pass to app install scripts.
+ * We explicitly whitelist instead of spreading process.env to prevent
+ * leaking sensitive orchestrator variables (DATABASE_URL, API keys, etc.)
+ * to potentially untrusted app installation scripts.
+ */
+const SAFE_ENV_VARS = ['PATH', 'HOME', 'LANG', 'USER', 'SHELL', 'TERM', 'TMPDIR', 'TZ'] as const;
 
 const executorLogger = logger.child({ component: 'executor' });
 
@@ -63,13 +72,11 @@ export class Executor {
 
   async install(appName: string, payload: CommandPayload): Promise<void> {
     const appDir = `${this.appsDir}/${appName}`;
-
-    // Track created paths for cleanup on failure
     const createdPaths: string[] = [];
     let installSuccess = false;
 
     try {
-      // Create app directory and track it
+      // Create app directory
       if (!existsSync(appDir)) {
         mkdirSync(appDir, { recursive: true });
         createdPaths.push(appDir);
@@ -81,140 +88,200 @@ export class Executor {
       const dataDirectories = metadata?.dataDirectories || [];
       const capabilities = metadata?.capabilities || [];
 
-      // === PRE-INSTALL: Privileged setup ===
+      // Step 1: Pre-install privileged setup (user, directories)
+      await this.setupPrivilegedResources(serviceUser, serviceGroup, dataDirectories, createdPaths);
 
-      // Create service user if specified
-      if (serviceUser) {
-        executorLogger.info(`Creating service user: ${serviceUser}`);
-        try {
-          const homeDir = dataDirectories[0]?.path || `/var/lib/${serviceUser}`;
-          const result = await privilegedClient.createServiceUser(serviceUser, homeDir);
-          if (result.success) {
-            executorLogger.info(`Service user created: ${serviceUser}`);
-          } else if (!result.error?.includes('already exists')) {
-            executorLogger.warn(`Could not create service user: ${result.error}`);
-          }
-        } catch (err) {
-          executorLogger.warn(`Failed to create service user via helper: ${err}`);
-        }
-      }
-
-      // Create data directories with correct ownership
-      for (const dir of dataDirectories) {
-        executorLogger.info(`Creating data directory: ${dir.path}`);
-        try {
-          const owner = serviceUser && serviceGroup ? `${serviceUser}:${serviceGroup}` : undefined;
-          const result = await privilegedClient.createDirectory(dir.path, owner, '755');
-          if (result.success) {
-            executorLogger.info(`Created directory: ${dir.path}`);
-            // Track created directories for potential cleanup
-            createdPaths.push(dir.path);
-          } else {
-            executorLogger.warn(`Could not create directory ${dir.path}: ${result.error}`);
-          }
-        } catch (err) {
-          executorLogger.warn(`Failed to create directory via helper: ${err}`);
-        }
-      }
-
-      // Write metadata file for status reporting
+      // Step 2: Write metadata and config files
       if (metadata) {
         const metadataPath = `${appDir}/.ownprem.json`;
         writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
         executorLogger.info(`Wrote metadata: ${metadataPath}`);
       }
-
-      // Write config files (install script, configs, etc.)
       if (payload.files) {
         await this.writeFiles(payload.files);
       }
 
-      // === RUN INSTALL SCRIPT ===
-      const installScript = `${appDir}/install.sh`;
-      if (existsSync(installScript)) {
-        // Use more permissive limits for install scripts (compiling, downloading, etc.)
-        await this.runScript(installScript, {
-          ...process.env,
-          ...payload.env,
-          APP_NAME: appName,
-          APP_VERSION: payload.version || '',
-          APP_DIR: appDir,
-          SERVICE_USER: serviceUser || '',
-          SERVICE_GROUP: serviceGroup || '',
-          DATA_DIR: dataDirectories[0]?.path || '',
-          CONFIG_DIR: dataDirectories[1]?.path || '',
-        }, SCRIPT_TIMEOUT_MS, INSTALL_SCRIPT_LIMITS);
-      }
+      // Step 3: Run install script
+      await this.runInstallScript(appDir, appName, payload, serviceUser, serviceGroup, dataDirectories);
 
-      // === POST-INSTALL: Finalize privileged setup ===
+      // Step 4: Post-install setup (capabilities, systemd service)
+      await this.finalizePrivilegedSetup(appDir, appName, metadata, capabilities, dataDirectories, serviceUser, serviceGroup);
 
-      // Set capabilities on binary if specified
-      for (const cap of capabilities) {
-        const binaryPath = `${appDir}/bin/${appName.replace('ownprem-', '')}`;
-        if (existsSync(binaryPath)) {
-          executorLogger.info(`Setting capability ${cap} on ${binaryPath}`);
-          try {
-            const result = await privilegedClient.setCapability(binaryPath, cap);
-            if (!result.success) {
-              executorLogger.warn(`Could not set capability: ${result.error}`);
-            }
-          } catch (err) {
-            executorLogger.warn(`Failed to set capability via helper: ${err}`);
-          }
-        }
-      }
-
-      // Copy systemd service template if it exists
-      const serviceName = metadata?.serviceName || appName;
-      const serviceTemplate = `${appDir}/templates/${serviceName}.service`;
-      if (existsSync(serviceTemplate)) {
-        executorLogger.info(`Installing systemd service: ${serviceName}`);
-        try {
-          // Read template and substitute variables
-          let serviceContent = readFileSync(serviceTemplate, 'utf-8');
-          serviceContent = serviceContent
-            .replace(/\$\{APP_DIR\}/g, appDir)
-            .replace(/\$\{DATA_DIR\}/g, dataDirectories[0]?.path || '')
-            .replace(/\$\{CONFIG_DIR\}/g, dataDirectories[1]?.path || '')
-            .replace(/\$\{SERVICE_USER\}/g, serviceUser || 'root')
-            .replace(/\$\{SERVICE_GROUP\}/g, serviceGroup || 'root');
-
-          const servicePath = `/etc/systemd/system/${serviceName}.service`;
-          const result = await privilegedClient.writeFile(servicePath, serviceContent);
-          if (result.success) {
-            executorLogger.info(`Wrote systemd service: ${servicePath}`);
-
-            // Register the service with privileged helper before systemctl operations
-            const registerResult = await privilegedClient.registerService(serviceName);
-            if (!registerResult.success) {
-              executorLogger.warn(`Could not register service: ${registerResult.error}`);
-            } else {
-              executorLogger.info(`Registered service: ${serviceName}`);
-            }
-
-            // Reload systemd
-            await privilegedClient.systemctl('daemon-reload');
-
-            // Enable service
-            const enableResult = await privilegedClient.systemctl('enable', serviceName);
-            if (enableResult.success) {
-              executorLogger.info(`Enabled service: ${serviceName}`);
-            }
-          } else {
-            executorLogger.warn(`Could not write systemd service: ${result.error}`);
-          }
-        } catch (err) {
-          executorLogger.warn(`Failed to install systemd service: ${err}`);
-        }
-      }
-
-      // Mark installation as successful
       installSuccess = true;
     } finally {
-      // Clean up created paths if installation failed
       if (!installSuccess) {
         await this.cleanupFailedInstall(appName, createdPaths);
       }
+    }
+  }
+
+  /**
+   * Set up privileged resources: service user and data directories.
+   */
+  private async setupPrivilegedResources(
+    serviceUser: string | undefined,
+    serviceGroup: string | undefined,
+    dataDirectories: Array<{ path: string }>,
+    createdPaths: string[]
+  ): Promise<void> {
+    // Create service user if specified
+    if (serviceUser) {
+      executorLogger.info(`Creating service user: ${serviceUser}`);
+      try {
+        const homeDir = dataDirectories[0]?.path || `/var/lib/${serviceUser}`;
+        const result = await privilegedClient.createServiceUser(serviceUser, homeDir);
+        if (result.success) {
+          executorLogger.info(`Service user created: ${serviceUser}`);
+        } else if (!result.error?.includes('already exists')) {
+          executorLogger.warn(`Could not create service user: ${result.error}`);
+        }
+      } catch (err) {
+        executorLogger.warn(`Failed to create service user via helper: ${err}`);
+      }
+    }
+
+    // Create data directories with correct ownership
+    for (const dir of dataDirectories) {
+      executorLogger.info(`Creating data directory: ${dir.path}`);
+      try {
+        const owner = serviceUser && serviceGroup ? `${serviceUser}:${serviceGroup}` : undefined;
+        const result = await privilegedClient.createDirectory(dir.path, owner, '755');
+        if (result.success) {
+          executorLogger.info(`Created directory: ${dir.path}`);
+          createdPaths.push(dir.path);
+        } else {
+          executorLogger.warn(`Could not create directory ${dir.path}: ${result.error}`);
+        }
+      } catch (err) {
+        executorLogger.warn(`Failed to create directory via helper: ${err}`);
+      }
+    }
+  }
+
+  /**
+   * Run the install script with a safe environment.
+   */
+  private async runInstallScript(
+    appDir: string,
+    appName: string,
+    payload: CommandPayload,
+    serviceUser: string | undefined,
+    serviceGroup: string | undefined,
+    dataDirectories: Array<{ path: string }>
+  ): Promise<void> {
+    const installScript = `${appDir}/install.sh`;
+    if (!existsSync(installScript)) {
+      return;
+    }
+
+    // Build safe environment from whitelist (prevents leaking sensitive vars)
+    const safeEnv: Record<string, string> = {};
+    for (const key of SAFE_ENV_VARS) {
+      if (process.env[key]) {
+        safeEnv[key] = process.env[key];
+      }
+    }
+
+    await this.runScript(installScript, {
+      ...safeEnv,
+      ...payload.env,
+      APP_NAME: appName,
+      APP_VERSION: payload.version || '',
+      APP_DIR: appDir,
+      SERVICE_USER: serviceUser || '',
+      SERVICE_GROUP: serviceGroup || '',
+      DATA_DIR: dataDirectories[0]?.path || '',
+      CONFIG_DIR: dataDirectories[1]?.path || '',
+    }, SCRIPT_TIMEOUT_MS, INSTALL_SCRIPT_LIMITS);
+  }
+
+  /**
+   * Finalize privileged setup: set capabilities and install systemd service.
+   */
+  private async finalizePrivilegedSetup(
+    appDir: string,
+    appName: string,
+    metadata: Record<string, unknown> | undefined,
+    capabilities: string[],
+    dataDirectories: Array<{ path: string }>,
+    serviceUser: string | undefined,
+    serviceGroup: string | undefined
+  ): Promise<void> {
+    // Set capabilities on binary if specified
+    for (const cap of capabilities) {
+      const binaryPath = `${appDir}/bin/${appName.replace('ownprem-', '')}`;
+      if (existsSync(binaryPath)) {
+        executorLogger.info(`Setting capability ${cap} on ${binaryPath}`);
+        try {
+          const result = await privilegedClient.setCapability(binaryPath, cap);
+          if (!result.success) {
+            executorLogger.warn(`Could not set capability: ${result.error}`);
+          }
+        } catch (err) {
+          executorLogger.warn(`Failed to set capability via helper: ${err}`);
+        }
+      }
+    }
+
+    // Install systemd service if template exists
+    const serviceName = (metadata?.serviceName as string) || appName;
+    const serviceTemplate = `${appDir}/templates/${serviceName}.service`;
+    if (!existsSync(serviceTemplate)) {
+      return;
+    }
+
+    await this.installSystemdService(
+      serviceTemplate, serviceName, appDir, dataDirectories, serviceUser, serviceGroup
+    );
+  }
+
+  /**
+   * Install and configure a systemd service from a template.
+   */
+  private async installSystemdService(
+    serviceTemplate: string,
+    serviceName: string,
+    appDir: string,
+    dataDirectories: Array<{ path: string }>,
+    serviceUser: string | undefined,
+    serviceGroup: string | undefined
+  ): Promise<void> {
+    executorLogger.info(`Installing systemd service: ${serviceName}`);
+    try {
+      // Read template and substitute variables
+      let serviceContent = readFileSync(serviceTemplate, 'utf-8');
+      serviceContent = serviceContent
+        .replace(/\$\{APP_DIR\}/g, appDir)
+        .replace(/\$\{DATA_DIR\}/g, dataDirectories[0]?.path || '')
+        .replace(/\$\{CONFIG_DIR\}/g, dataDirectories[1]?.path || '')
+        .replace(/\$\{SERVICE_USER\}/g, serviceUser || 'root')
+        .replace(/\$\{SERVICE_GROUP\}/g, serviceGroup || 'root');
+
+      const servicePath = `/etc/systemd/system/${serviceName}.service`;
+      const result = await privilegedClient.writeFile(servicePath, serviceContent);
+      if (!result.success) {
+        executorLogger.warn(`Could not write systemd service: ${result.error}`);
+        return;
+      }
+
+      executorLogger.info(`Wrote systemd service: ${servicePath}`);
+
+      // Register the service with privileged helper
+      const registerResult = await privilegedClient.registerService(serviceName);
+      if (!registerResult.success) {
+        executorLogger.warn(`Could not register service: ${registerResult.error}`);
+      } else {
+        executorLogger.info(`Registered service: ${serviceName}`);
+      }
+
+      // Reload systemd and enable service
+      await privilegedClient.systemctl('daemon-reload');
+      const enableResult = await privilegedClient.systemctl('enable', serviceName);
+      if (enableResult.success) {
+        executorLogger.info(`Enabled service: ${serviceName}`);
+      }
+    } catch (err) {
+      executorLogger.warn(`Failed to install systemd service: ${err}`);
     }
   }
 
