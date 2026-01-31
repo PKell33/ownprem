@@ -83,12 +83,8 @@ jobs:
       - name: Build shared package
         run: npm run build -w packages/shared
 
-      - name: Run UI tests
-        run: npm run test:run -w apps/ui
-
       - name: Run UI tests with coverage
         run: npm run test:coverage -w apps/ui
-        continue-on-error: true
 
       - name: Upload UI coverage
         uses: actions/upload-artifact@v4
