@@ -1,6 +1,6 @@
 # Ownprem
 
-Sovereign Bitcoin infrastructure platform. Deploy and manage Bitcoin nodes, indexers, and Lightning services across one or more servers with a unified web interface.
+Self-hosted app deployment and monitoring platform. Deploy and manage applications across one or more servers with a unified web interface and single-click deployment.
 
 ## Quick Reference
 
@@ -8,7 +8,7 @@ Sovereign Bitcoin infrastructure platform. Deploy and manage Bitcoin nodes, inde
 |---------|-------------|
 | Orchestrator | Central API server, manages deployments, secrets, proxy config |
 | Agent | Runs on each server, executes commands from orchestrator |
-| App | Bitcoin software (bitcoin, electrs, mempool, lnd, etc.) |
+| App | Any application from the marketplace that runs on Linux |
 | Server | Machine running an agent (core server runs both orchestrator + agent) |
 
 ## Architecture
@@ -36,8 +36,8 @@ User → https://ownprem.local
 │  └─────────┘         └────┬────┘       │
 │       │                   │            │
 │       ▼                   ▼            │
-│  /apps/mock-app →   [mock-app:9999]    │
-│  /apps/bitcoin  →   [bitcoind:8332]    │
+│  /apps/myapp    →   [myapp:8080]       │
+│  /apps/postgres →   [postgres:5432]    │
 └──────────────────────────────────────────┘
               │
          WebSocket
@@ -48,8 +48,8 @@ User → https://ownprem.local
 │ server-1 │   │ server-2 │
 │  Agent   │   │  Agent   │
 │    │     │   │    │     │
-│ electrs  │   │   lnd    │
-│ mempool  │   │   rtl    │
+│ postgres │   │  redis   │
+│  nginx   │   │  grafana │
 └──────────┘   └──────────┘
 ```
 
@@ -69,8 +69,7 @@ ownprem/
 │   └── ui/                    # React frontend (Vite)
 ├── app-definitions/           # App manifests and install scripts
 │   ├── mock-app/              # Test app for development
-│   ├── bitcoin/               # Bitcoin Core
-│   └── .../                   # More apps
+│   └── .../                   # Marketplace apps
 └── scripts/                   # Installation and deployment
     ├── install.sh             # Main installer
     ├── caddy/                 # Caddy setup
@@ -213,35 +212,35 @@ Orchestrator → Agent:
 ## App Manifest Structure
 
 ```yaml
-name: electrs
-displayName: Electrs
-version: 0.11.0
-category: indexer
-description: Electrum server for Bitcoin
+name: myapp
+displayName: My Application
+version: 1.0.0
+category: web
+description: Example web application
 
 source:
   type: git
-  url: https://github.com/romanz/electrs.git
+  url: https://github.com/example/myapp.git
 
 requires:
-  - service: bitcoin-rpc
+  - service: postgres
     locality: prefer-same-server
 
 provides:
-  - name: electrs-rpc
-    port: 50001
-    protocol: tcp
+  - name: myapp-http
+    port: 8080
+    protocol: http
 
 webui:
   enabled: true
-  port: 3006
-  basePath: /apps/electrs
+  port: 8080
+  basePath: /apps/myapp
 
 configSchema:
-  - name: network
+  - name: environment
     type: string
-    default: mainnet
-    options: [mainnet, testnet, regtest]
+    default: production
+    options: [production, staging, development]
 ```
 
 ## Privileged Helper

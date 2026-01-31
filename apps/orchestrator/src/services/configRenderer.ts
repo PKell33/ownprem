@@ -60,41 +60,34 @@ export class ConfigRenderer {
       return files;
     }
 
-    // Common config file mappings
-    const configMappings: Record<string, { template: string; output: string; mode?: string }> = {
-      bitcoin: {
-        template: 'bitcoin.conf.njk',
-        output: '/home/bitcoin/.bitcoin/bitcoin.conf',
-        mode: '0640',
-      },
-      electrs: {
-        template: 'electrs.toml.njk',
-        output: '/etc/electrs/electrs.toml',
-        mode: '0644',
-      },
-      mempool: {
-        template: 'mempool-config.json.njk',
-        output: '/opt/ownprem/apps/mempool/backend/mempool-config.json',
-        mode: '0644',
-      },
-      lnd: {
-        template: 'lnd.conf.njk',
-        output: '/home/lnd/.lnd/lnd.conf',
-        mode: '0640',
-      },
-    };
+    // Config file mappings can be defined in the manifest's configFiles section
+    // or discovered from templates directory with a config.json manifest
+    const configManifestPath = join(templatesPath, 'config.json');
+    const handledTemplates = new Set<string>();
 
-    const mapping = configMappings[manifest.name];
-    if (mapping) {
-      const templatePath = join(templatesPath, mapping.template);
-      if (existsSync(templatePath)) {
-        const template = readFileSync(templatePath, 'utf-8');
-        const content = this.renderTemplate(template, context);
-        files.push({
-          path: mapping.output,
-          content,
-          mode: mapping.mode,
-        });
+    if (existsSync(configManifestPath)) {
+      try {
+        const configManifest = JSON.parse(readFileSync(configManifestPath, 'utf-8')) as Array<{
+          template: string;
+          output: string;
+          mode?: string;
+        }>;
+
+        for (const mapping of configManifest) {
+          const templatePath = join(templatesPath, mapping.template);
+          if (existsSync(templatePath)) {
+            const template = readFileSync(templatePath, 'utf-8');
+            const content = this.renderTemplate(template, context);
+            files.push({
+              path: mapping.output,
+              content,
+              mode: mapping.mode,
+            });
+            handledTemplates.add(mapping.template);
+          }
+        }
+      } catch {
+        // Ignore config manifest parse errors
       }
     }
 
@@ -105,8 +98,8 @@ export class ConfigRenderer {
       const templateFiles = readdirSync(templatesPath).filter(f => f.endsWith('.njk'));
 
       for (const templateFile of templateFiles) {
-        // Skip if already handled by mapping
-        if (mapping && templateFile === mapping.template) {
+        // Skip if already handled by config.json mapping
+        if (handledTemplates.has(templateFile)) {
           continue;
         }
 

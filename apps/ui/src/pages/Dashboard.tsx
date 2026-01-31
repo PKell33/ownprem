@@ -36,8 +36,8 @@ export default function Dashboard() {
   };
   const appsWithWebUI = runningDeployments.filter((d) => {
     // We'd need the manifest to know if it has webui
-    // For now, check common apps
-    return ['mempool', 'rtl', 'thunderhub', 'mock-app'].includes(d.appName);
+    // For now, check common apps that have web interfaces
+    return ['mock-app', 'grafana', 'portainer', 'adminer', 'pgadmin'].includes(d.appName);
   });
 
   // Seed metrics from server data on load
@@ -56,7 +56,7 @@ export default function Dashboard() {
       <div>
         <h1 className="text-xl md:text-2xl font-bold mb-1 md:mb-2">Dashboard</h1>
         <p className="text-sm md:text-base text-muted">
-          Overview of your Bitcoin infrastructure
+          Overview of your deployed applications
         </p>
       </div>
 

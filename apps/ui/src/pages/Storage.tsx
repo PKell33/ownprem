@@ -242,7 +242,7 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="bitcoin-storage"
+          placeholder="app-storage"
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
           required
           pattern="^[a-zA-Z0-9_-]+$"
@@ -284,7 +284,7 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
           type="text"
           value={source}
           onChange={(e) => setSource(e.target.value)}
-          placeholder={mountType === 'nfs' ? '192.168.1.10:/volume/bitcoin' : '//192.168.1.10/bitcoin'}
+          placeholder={mountType === 'nfs' ? '192.168.1.10:/volume/data' : '//192.168.1.10/share'}
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
           required
         />
@@ -313,7 +313,7 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
           type="text"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Bitcoin blockchain storage on NAS"
+          placeholder="App data storage on NAS"
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
         />
       </div>

@@ -398,7 +398,7 @@ export function Login() {
         {/* Footer links */}
         <div className="mt-8 pt-6" style={{ borderTop: '1px solid rgba(122, 162, 247, 0.1)' }}>
           <p className="text-center text-sm" style={{ color: '#565f89' }}>
-            Sovereign Bitcoin Infrastructure
+            Self-Hosted App Platform
           </p>
           <p className="mt-2 text-center">
             <Link

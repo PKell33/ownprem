@@ -107,10 +107,10 @@ export default function Apps() {
 
   const categories = [
     { id: 'system', label: 'System' },
-    { id: 'bitcoin', label: 'Bitcoin' },
-    { id: 'lightning', label: 'Lightning' },
-    { id: 'indexer', label: 'Indexers' },
-    { id: 'explorer', label: 'Explorers' },
+    { id: 'database', label: 'Database' },
+    { id: 'web', label: 'Web' },
+    { id: 'networking', label: 'Networking' },
+    { id: 'monitoring', label: 'Monitoring' },
     { id: 'utility', label: 'Utilities' },
   ];
 
@@ -122,7 +122,7 @@ export default function Apps() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold mb-2">Marketplace</h1>
-        <p className="text-gray-400">Browse and install Bitcoin applications</p>
+        <p className="text-gray-400">Browse and install applications from the marketplace</p>
       </div>
 
       {appsLoading ? (

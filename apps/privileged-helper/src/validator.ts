@@ -8,18 +8,15 @@
 import type { HelperRequest } from './types.js';
 
 // Allowed service user names (for create_service_user)
+// System users + pattern-based validation for app users
 const ALLOWED_SERVICE_USERS = new Set([
   'step-ca',
   'caddy',
-  'bitcoind',
-  'electrs',
-  'mempool',
-  'lnd',
-  'cln',
-  'rtl',
-  'btcpay',
-  'fulcrum',
+  'ownprem',
 ]);
+
+// Pattern for valid app service user names (alphanumeric, hyphen, underscore)
+const APP_USER_PATTERN = /^[a-z][a-z0-9_-]{0,30}$/;
 
 // Allowed home directory prefixes for service users
 const ALLOWED_HOME_PREFIXES = [
@@ -28,24 +25,14 @@ const ALLOWED_HOME_PREFIXES = [
 ];
 
 // Allowed directory prefixes for create_directory, set_ownership, set_permissions
+// Uses broad patterns to support dynamic app deployments
 const ALLOWED_PATH_PREFIXES = [
-  '/var/lib/step-ca',
-  '/var/lib/caddy',
-  '/var/lib/bitcoind',
-  '/var/lib/electrs',
-  '/var/lib/mempool',
-  '/var/lib/lnd',
-  '/var/lib/cln',
-  '/var/lib/rtl',
-  '/var/lib/btcpay',
-  '/var/lib/fulcrum',
-  '/var/lib/ownprem',
+  '/var/lib/',           // App data directories
   '/etc/step-ca',
   '/etc/caddy',
   '/etc/keepalived',
   '/etc/ownprem',
-  '/var/log/caddy',
-  '/var/log/ownprem',
+  '/var/log/',           // App log directories
   '/opt/ownprem/apps',
   '/mnt',
 ];
@@ -193,7 +180,8 @@ export function validateRequest(request: HelperRequest): void {
       if (!USERNAME_PATTERN.test(request.username)) {
         throw new ValidationError(`Invalid username format: ${request.username}`);
       }
-      if (!ALLOWED_SERVICE_USERS.has(request.username)) {
+      // Allow system users from explicit list OR app users matching the pattern
+      if (!ALLOWED_SERVICE_USERS.has(request.username) && !APP_USER_PATTERN.test(request.username)) {
         throw new ValidationError(`User not in allowlist: ${request.username}`);
       }
       if (!ALLOWED_HOME_PREFIXES.some(p => request.homeDir.startsWith(p))) {

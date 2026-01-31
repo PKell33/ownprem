@@ -2,7 +2,7 @@
   "name": "ownprem",
   "version": "0.1.0",
   "private": true,
-  "description": "Sovereign Bitcoin infrastructure platform",
+  "description": "Self-hosted app deployment and monitoring platform",
   "workspaces": [
     "packages/*",
     "apps/*"

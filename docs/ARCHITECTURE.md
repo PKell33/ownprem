@@ -1,6 +1,6 @@
 # Ownprem - Build Prompt
 
-Sovereign Bitcoin infrastructure platform. Single control plane (orchestrator) manages app servers running Bitcoin services. Web GUI with unified access to all apps.
+Self-hosted app deployment and monitoring platform. Single control plane (orchestrator) manages app servers running various services. Web GUI with unified access to all apps.
 
 ## Naming
 
@@ -9,7 +9,7 @@ Sovereign Bitcoin infrastructure platform. Single control plane (orchestrator) m
 | Project | **ownprem** | |
 | Orchestrator | **orchestrator** | Always one, runs on core server |
 | App Server | **server** | `core`, `server-1`, `server-2` |
-| App | **app** | `bitcoin`, `electrs`, `mempool` |
+| App | **app** | `postgres`, `redis`, `nginx` |
 
 ## Architecture Overview
 
@@ -25,8 +25,8 @@ Sovereign Bitcoin infrastructure platform. Single control plane (orchestrator) m
 │  │                    Reverse Proxy (Caddy)                        │ │
 │  │  /              → UI                                            │ │
 │  │  /api/*         → Orchestrator API                              │ │
-│  │  /apps/mempool/ → server-1:3006                                 │ │
-│  │  /apps/rtl/     → server-2:3000                                 │ │
+│  │  /apps/grafana/ → server-1:3000                                 │ │
+│  │  /apps/adminer/ → server-2:8080                                 │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │                                                                      │
 │  ┌─────────────────┐           ┌─────────────────┐                  │
@@ -38,7 +38,7 @@ Sovereign Bitcoin infrastructure platform. Single control plane (orchestrator) m
 │  │  - Secrets      │           └────────┬────────┘                  │
 │  │  - Proxy Config │                    │                           │
 │  └─────────────────┘              ┌─────┴─────┐                     │
-│                                   │  bitcoin  │                     │
+│                                   │  postgres │                     │
 │                                   └───────────┘                     │
 └──────────────────────────────────────────────────────────────────────┘
          │
@@ -55,8 +55,8 @@ Sovereign Bitcoin infrastructure platform. Single control plane (orchestrator) m
 │  └─────┬─────┘  │        │  └─────┬─────┘  │
 │        │        │        │        │        │
 │  ┌─────┴─────┐  │        │  ┌─────┴─────┐  │
-│  │  electrs  │  │        │  │    lnd    │  │
-│  │  mempool  │  │        │  │    rtl    │  │
+│  │  grafana  │  │        │  │   redis   │  │
+│  │   nginx   │  │        │  │  adminer  │  │
 │  └───────────┘  │        │  └───────────┘  │
 └─────────────────┘        └─────────────────┘
 ```
@@ -90,8 +90,8 @@ Single machine runs everything:
 │  └─────────────┘  └──────┬──────┘  │
 │                          │         │
 │                    ┌─────┴─────┐   │
-│                    │  bitcoin  │   │
-│                    │  mempool  │   │
+│                    │  postgres │   │
+│                    │   redis   │   │
 │                    └───────────┘   │
 └─────────────────────────────────────┘
 ```
@@ -107,8 +107,8 @@ Multiple machines:
 │  Orchestrator     │  │      Agent        │  │      Agent        │
 │  + Agent          │  │        │          │  │        │          │
 │      │            │  │   ┌────┴────┐     │  │   ┌────┴────┐     │
-│ ┌────┴────┐       │  │   │ electrs │     │  │   │   lnd   │     │
-│ │ bitcoin │       │  │   │ mempool │     │  │   │   rtl   │     │
+│ ┌────┴────┐       │  │   │ grafana │     │  │   │  redis  │     │
+│ │ postgres │      │  │   │  nginx  │     │  │   │ adminer │     │
 │ └─────────┘       │  │   └─────────┘     │  │   └─────────┘     │
 └───────────────────┘  └───────────────────┘  └───────────────────┘
 ```
@@ -124,8 +124,8 @@ Orchestrator doesn't run apps:
 │  Orchestrator     │  │      Agent        │  │      Agent        │
 │  (no agent)       │  │        │          │  │        │          │
 │                   │  │   ┌────┴────┐     │  │   ┌────┴────┐     │
-│                   │  │   │ bitcoin │     │  │   │ electrs │     │
-│                   │  │   │ mempool │     │  │   └─────────┘     │
+│                   │  │   │ postgres │    │  │   │  redis  │     │
+│                   │  │   │ grafana  │    │  │   └─────────┘     │
 │                   │  │   └─────────┘     │  │                   │
 └───────────────────┘  └───────────────────┘  └───────────────────┘
 ```
@@ -252,26 +252,20 @@ github.com/yourname/ownprem/
 │               └── Settings.tsx
 │
 ├── app-definitions/                # App manifests + scripts
-│   ├── bitcoin/
+│   ├── mock-app/
 │   │   ├── manifest.yaml
 │   │   ├── install.sh
 │   │   ├── configure.sh
 │   │   ├── uninstall.sh
 │   │   └── templates/
-│   │       └── bitcoin.conf.njk
-│   ├── electrs/
+│   │       └── config.json.njk
+│   ├── postgres/
 │   │   ├── manifest.yaml
 │   │   ├── install.sh
 │   │   ├── configure.sh
 │   │   └── templates/
-│   │       └── electrs.toml.njk
-│   ├── mempool/
-│   │   ├── manifest.yaml
-│   │   ├── install.sh
-│   │   ├── configure.sh
-│   │   └── templates/
-│   │       └── mempool-config.json.njk
-│   └── lnd/
+│   │       └── postgresql.conf.njk
+│   └── redis/
 │       └── ...
 │
 └── scripts/
@@ -310,23 +304,21 @@ export interface ServerMetrics {
 // packages/shared/src/types/app.ts
 
 export interface AppManifest {
-  name: string;                     // 'bitcoin', 'electrs', etc.
-  displayName: string;              // 'Bitcoin Knots'
+  name: string;                     // 'postgres', 'redis', etc.
+  displayName: string;              // 'PostgreSQL'
   description: string;
   version: string;
-  category: 'bitcoin' | 'lightning' | 'indexer' | 'explorer' | 'utility';
-  
+  category: 'database' | 'web' | 'networking' | 'monitoring' | 'utility' | 'system';
+
   source: AppSource;
-  
+
   provides?: ServiceDefinition[];
   requires?: ServiceRequirement[];
-  
-  tor?: TorService[];
-  
+
   webui?: WebUI;
-  
+
   configSchema: ConfigField[];
-  
+
   resources?: {
     minMemory?: string;
     minDisk?: string;
@@ -343,9 +335,9 @@ export interface AppSource {
 }
 
 export interface ServiceDefinition {
-  name: string;                     // 'bitcoin-rpc'
+  name: string;                     // 'postgres-db'
   port: number;
-  protocol: 'tcp' | 'http' | 'zmq';
+  protocol: 'tcp' | 'http';
   credentials?: {
     type: 'rpc' | 'token' | 'password';
     fields: string[];               // ['username', 'password']
@@ -353,7 +345,7 @@ export interface ServiceDefinition {
 }
 
 export interface ServiceRequirement {
-  service: string;                  // 'bitcoin-rpc'
+  service: string;                  // 'postgres-db'
   optional?: boolean;
   locality: 'same-server' | 'any-server' | 'prefer-same-server';
   injectAs: {
@@ -363,16 +355,10 @@ export interface ServiceRequirement {
   };
 }
 
-export interface TorService {
-  name: string;
-  virtualPort: number;
-  targetPort: number;
-}
-
 export interface WebUI {
   enabled: boolean;
   port: number;
-  basePath: string;                 // '/apps/mempool'
+  basePath: string;                 // '/apps/grafana'
 }
 
 export interface ConfigField {
@@ -400,7 +386,6 @@ export interface Deployment {
   config: Record<string, any>;
   status: DeploymentStatus;
   statusMessage?: string;
-  torAddresses?: Record<string, string>;
   installedAt: Date;
   updatedAt: Date;
 }
@@ -455,9 +440,6 @@ export interface AppStatus {
   name: string;
   status: 'running' | 'stopped' | 'error' | 'not-installed';
   version?: string;
-  syncProgress?: number;
-  blockHeight?: number;
-  torAddresses?: Record<string, string>;
 }
 ```
 
@@ -494,10 +476,9 @@ CREATE TABLE deployments (
     config JSON NOT NULL,
     status TEXT DEFAULT 'pending',
     status_message TEXT,
-    tor_addresses JSON,
     installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     UNIQUE(server_id, app_name)
 );
 
@@ -517,9 +498,8 @@ CREATE TABLE services (
     server_id TEXT NOT NULL REFERENCES servers(id),
     host TEXT NOT NULL,
     port INTEGER NOT NULL,
-    tor_address TEXT,
     status TEXT DEFAULT 'available',
-    
+
     UNIQUE(deployment_id, service_name)
 );
 
@@ -529,8 +509,8 @@ CREATE INDEX idx_services_name ON services(service_name);
 CREATE TABLE proxy_routes (
     id TEXT PRIMARY KEY,
     deployment_id TEXT NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
-    path TEXT NOT NULL UNIQUE,      -- '/apps/mempool'
-    upstream TEXT NOT NULL,         -- 'http://10.0.0.11:3006'
+    path TEXT NOT NULL UNIQUE,      -- '/apps/grafana'
+    upstream TEXT NOT NULL,         -- 'http://10.0.0.11:3000'
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -608,9 +588,8 @@ Client → Server:
 ```
 https://ownprem.local/                  → Ownprem UI
 https://ownprem.local/api/              → Orchestrator API
-https://ownprem.local/apps/mempool/     → Mempool (proxied to server-1:3006)
-https://ownprem.local/apps/rtl/         → RTL (proxied to server-2:3000)
-https://ownprem.local/apps/thunderhub/  → ThunderHub (proxied to server-2:3001)
+https://ownprem.local/apps/grafana/     → Grafana (proxied to server-1:3000)
+https://ownprem.local/apps/adminer/     → Adminer (proxied to server-2:8080)
 ```
 
 ### Proxy Manager
@@ -620,10 +599,10 @@ https://ownprem.local/apps/thunderhub/  → ThunderHub (proxied to server-2:3001
 
 export class ProxyManager {
   constructor(private db: Database) {}
-  
+
   async updateRoutes() {
     const deployments = await this.db.query(`
-      SELECT 
+      SELECT
         d.id,
         d.server_id,
         s.host,
@@ -634,7 +613,7 @@ export class ProxyManager {
       WHERE d.status = 'running'
       AND JSON_EXTRACT(ar.manifest, '$.webui.enabled') = true
     `);
-    
+
     const routes = deployments.map(d => {
       const webui = d.manifest.webui;
       const host = d.host || '127.0.0.1';
@@ -643,516 +622,47 @@ export class ProxyManager {
         upstream: `http://${host}:${webui.port}`
       };
     });
-    
+
     await this.writeCaddyConfig(routes);
     await this.reloadCaddy();
-  }
-  
-  private async writeCaddyConfig(routes: Route[]) {
-    const config = `
-{
-  auto_https off
-}
-
-:3000 {
-  # Ownprem UI
-  handle / {
-    root * /opt/ownprem/ui/dist
-    file_server
-    try_files {path} /index.html
-  }
-
-  # Orchestrator API
-  handle /api/* {
-    reverse_proxy localhost:3001
-  }
-  
-  # WebSocket
-  handle /socket.io/* {
-    reverse_proxy localhost:3001
-  }
-  
-  # App Web UIs
-${routes.map(r => `
-  handle ${r.path}/* {
-    uri strip_prefix ${r.path}
-    reverse_proxy ${r.upstream}
-  }
-`).join('\n')}
-}
-`;
-    await writeFile('/etc/caddy/Caddyfile', config);
-  }
-}
-```
-
-### Authentication Middleware
-
-All requests to `/apps/*` require valid session:
-
-```typescript
-// apps/orchestrator/src/api/middleware/auth.ts
-
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const session = getSession(req);
-  
-  if (!session || !session.valid) {
-    if (req.path.startsWith('/apps/')) {
-      return res.redirect('/login?redirect=' + encodeURIComponent(req.path));
-    }
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  
-  next();
-}
-```
-
-## Agent Implementation
-
-```typescript
-// apps/agent/src/index.ts
-
-import { io, Socket } from 'socket.io-client';
-import { AgentCommand, AgentStatusReport } from '@ownprem/shared';
-import { Executor } from './executor';
-import { Reporter } from './reporter';
-
-class Agent {
-  private socket: Socket;
-  private executor: Executor;
-  private reporter: Reporter;
-
-  constructor(
-    private serverId: string,
-    private orchestratorUrl: string,
-    private authToken: string | null
-  ) {
-    this.executor = new Executor();
-    this.reporter = new Reporter(serverId);
-  }
-
-  async start() {
-    this.connect();
-    setInterval(() => this.reportStatus(), 10000);
-  }
-
-  private connect() {
-    this.socket = io(this.orchestratorUrl, {
-      auth: {
-        serverId: this.serverId,
-        token: this.authToken
-      },
-      reconnection: true,
-      reconnectionDelay: 5000
-    });
-
-    this.socket.on('connect', () => {
-      console.log(`Connected to orchestrator as ${this.serverId}`);
-      this.reportStatus();
-    });
-    
-    this.socket.on('command', async (cmd: AgentCommand) => {
-      await this.handleCommand(cmd);
-    });
-  }
-  
-  private async handleCommand(cmd: AgentCommand) {
-    console.log(`[${cmd.id}] ${cmd.action} ${cmd.appName}`);
-    const start = Date.now();
-    
-    try {
-      switch (cmd.action) {
-        case 'install':
-          await this.executor.install(cmd.appName, cmd.payload!);
-          break;
-        case 'configure':
-          await this.executor.configure(cmd.appName, cmd.payload!.files!);
-          break;
-        case 'start':
-          await this.executor.systemctl('start', cmd.appName);
-          break;
-        case 'stop':
-          await this.executor.systemctl('stop', cmd.appName);
-          break;
-        case 'restart':
-          await this.executor.systemctl('restart', cmd.appName);
-          break;
-        case 'uninstall':
-          await this.executor.uninstall(cmd.appName);
-          break;
-      }
-      
-      this.socket.emit('command:result', {
-        commandId: cmd.id,
-        status: 'success',
-        duration: Date.now() - start
-      });
-    } catch (err) {
-      this.socket.emit('command:result', {
-        commandId: cmd.id,
-        status: 'error',
-        message: err.message,
-        duration: Date.now() - start
-      });
-    }
-    
-    await this.reportStatus();
-  }
-  
-  private async reportStatus() {
-    const status: AgentStatusReport = {
-      serverId: this.serverId,
-      timestamp: new Date(),
-      metrics: await this.reporter.getMetrics(),
-      apps: await this.reporter.getAppStatuses()
-    };
-    
-    this.socket.emit('status', status);
-  }
-}
-
-// Entry point
-const agent = new Agent(
-  process.env.SERVER_ID!,
-  process.env.ORCHESTRATOR_URL!,
-  process.env.AUTH_TOKEN || null
-);
-agent.start();
-```
-
-```typescript
-// apps/agent/src/executor.ts
-
-import { execSync } from 'child_process';
-import { writeFileSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
-import { CommandPayload, ConfigFile } from '@ownprem/shared';
-
-export class Executor {
-  private appsDir = '/opt/ownprem/apps';
-  
-  async install(appName: string, payload: CommandPayload) {
-    const appDir = `${this.appsDir}/${appName}`;
-    mkdirSync(appDir, { recursive: true });
-    
-    await this.writeFiles(payload.files || []);
-    
-    this.runScript(`${appDir}/install.sh`, {
-      ...process.env,
-      ...payload.env,
-      APP_NAME: appName,
-      APP_VERSION: payload.version || ''
-    });
-  }
-  
-  async configure(appName: string, files: ConfigFile[]) {
-    await this.writeFiles(files);
-    
-    const appDir = `${this.appsDir}/${appName}`;
-    this.runScript(`${appDir}/configure.sh`, { APP_NAME: appName });
-  }
-  
-  async uninstall(appName: string) {
-    await this.systemctl('stop', appName).catch(() => {});
-    
-    const appDir = `${this.appsDir}/${appName}`;
-    this.runScript(`${appDir}/uninstall.sh`, { APP_NAME: appName });
-  }
-  
-  async systemctl(action: string, service: string) {
-    execSync(`systemctl ${action} ${service}`, { stdio: 'inherit' });
-  }
-  
-  private async writeFiles(files: ConfigFile[]) {
-    for (const file of files) {
-      mkdirSync(dirname(file.path), { recursive: true });
-      writeFileSync(file.path, file.content, {
-        mode: parseInt(file.mode || '0644', 8)
-      });
-      if (file.owner) {
-        execSync(`chown ${file.owner} ${file.path}`);
-      }
-    }
-  }
-  
-  private runScript(script: string, env: Record<string, string>) {
-    execSync(`bash ${script}`, { stdio: 'inherit', env: env as any });
-  }
-}
-```
-
-## Dependency Resolution
-
-```typescript
-// apps/orchestrator/src/services/dependencyResolver.ts
-
-export class DependencyResolver {
-  constructor(
-    private db: Database,
-    private secrets: SecretsManager
-  ) {}
-  
-  async validate(appName: string, targetServerId: string): Promise<ValidationResult> {
-    const manifest = await this.getManifest(appName);
-    const errors: string[] = [];
-    const warnings: string[] = [];
-    
-    for (const req of manifest.requires || []) {
-      const provider = await this.findProvider(req.service);
-      
-      if (!provider) {
-        if (req.optional) {
-          warnings.push(`Optional service '${req.service}' not available`);
-        } else {
-          errors.push(`Required service '${req.service}' not found`);
-        }
-        continue;
-      }
-      
-      const sameServer = provider.serverId === targetServerId;
-      
-      if (req.locality === 'same-server' && !sameServer) {
-        errors.push(`${req.service} must be on same server`);
-      }
-      
-      if (req.locality === 'prefer-same-server' && !sameServer) {
-        warnings.push(`${req.service} on different server may have higher latency`);
-      }
-    }
-    
-    return { valid: errors.length === 0, errors, warnings };
-  }
-  
-  async resolve(
-    manifest: AppManifest,
-    targetServerId: string,
-    userConfig: Record<string, any>
-  ): Promise<Record<string, any>> {
-    const config = { ...userConfig };
-    
-    for (const req of manifest.requires || []) {
-      const connection = await this.getConnection(req.service, targetServerId);
-      
-      if (connection) {
-        if (req.injectAs.host) config[req.injectAs.host] = connection.host;
-        if (req.injectAs.port) config[req.injectAs.port] = connection.port;
-        
-        if (req.injectAs.credentials && connection.credentials) {
-          for (const [from, to] of Object.entries(req.injectAs.credentials)) {
-            config[to] = connection.credentials[from];
-          }
-        }
-      }
-    }
-    
-    // Handle inheritFrom
-    for (const field of manifest.configSchema) {
-      if (field.inheritFrom && config[field.name] === undefined) {
-        const [depApp, depField] = field.inheritFrom.split('.');
-        const depConfig = await this.getDeploymentConfig(depApp);
-        if (depConfig) config[field.name] = depConfig[depField];
-      }
-    }
-    
-    return config;
-  }
-  
-  private async getConnection(serviceName: string, consumerServerId: string) {
-    const service = await this.db.get(`
-      SELECT s.*, srv.host 
-      FROM services s
-      JOIN servers srv ON s.server_id = srv.id
-      WHERE s.service_name = ? AND s.status = 'available'
-    `, [serviceName]);
-    
-    if (!service) return null;
-    
-    const sameServer = service.server_id === consumerServerId;
-    const host = sameServer ? '127.0.0.1' : service.host;
-    
-    const creds = await this.secrets.getServiceCredentials(service.deployment_id);
-    
-    return { host, port: service.port, credentials: creds };
   }
 }
 ```
 
 ## App Manifest Examples
 
-### Bitcoin
+### PostgreSQL
 
 ```yaml
-# app-definitions/bitcoin/manifest.yaml
+# app-definitions/postgres/manifest.yaml
 
-name: bitcoin
-displayName: Bitcoin Knots
-description: Full Bitcoin node with enhanced features
-version: 29.2.knots20251110
-category: bitcoin
+name: postgres
+displayName: PostgreSQL
+description: Advanced open source relational database
+version: 16.2
+category: database
 
 source:
-  type: binary
-  githubRepo: bitcoinknots/bitcoin
-  downloadUrl: "https://bitcoinknots.org/files/29.x/${version}/bitcoin-${version}-${arch}.tar.gz"
-  checksumUrl: "https://bitcoinknots.org/files/29.x/${version}/SHA256SUMS"
+  type: apt
+  package: postgresql-16
 
 provides:
-  - name: bitcoin-rpc
-    port: 8332
-    protocol: http
+  - name: postgres-db
+    port: 5432
+    protocol: tcp
     credentials:
-      type: rpc
-      fields: [rpcuser, rpcpassword]
-  - name: bitcoin-p2p
-    port: 8333
-    protocol: tcp
-  - name: bitcoin-zmq-block
-    port: 28332
-    protocol: zmq
-  - name: bitcoin-zmq-tx
-    port: 28333
-    protocol: zmq
-
-tor:
-  - name: bitcoin-p2p
-    virtualPort: 8333
-    targetPort: 8333
-  - name: bitcoin-rpc
-    virtualPort: 8332
-    targetPort: 8332
+      type: password
+      fields: [username, password]
 
 configSchema:
-  - name: network
-    type: select
-    label: Network
-    options: [mainnet, testnet, signet]
-    default: mainnet
-  - name: txindex
-    type: boolean
-    label: Transaction Index
-    default: true
-  - name: prune
+  - name: max_connections
     type: number
-    label: Prune (MB)
-    description: "0 = no pruning"
-    default: 0
-  - name: rpcuser
+    label: Max Connections
+    default: 100
+  - name: shared_buffers
     type: string
-    generated: true
-    secret: true
-  - name: rpcpassword
-    type: password
-    generated: true
-    secret: true
-
-resources:
-  minDisk: 700GB
-  minMemory: 2GB
-```
-
-### Electrs
-
-```yaml
-# app-definitions/electrs/manifest.yaml
-
-name: electrs
-displayName: Electrs
-description: Efficient Electrum Server in Rust
-version: 0.11.0
-category: indexer
-
-source:
-  type: git
-  githubRepo: romanz/electrs
-  gitUrl: https://github.com/romanz/electrs.git
-  tagPrefix: v
-
-requires:
-  - service: bitcoin-rpc
-    locality: prefer-same-server
-    injectAs:
-      host: daemon_rpc_host
-      port: daemon_rpc_port
-      credentials:
-        rpcuser: daemon_rpc_user
-        rpcpassword: daemon_rpc_pass
-
-provides:
-  - name: electrs-rpc
-    port: 50001
-    protocol: tcp
-
-tor:
-  - name: electrs
-    virtualPort: 50001
-    targetPort: 50001
-
-configSchema:
-  - name: network
-    type: string
-    inheritFrom: bitcoin.network
-  - name: log_filters
-    type: select
-    label: Log Level
-    options: [ERROR, WARN, INFO, DEBUG]
-    default: INFO
-
-resources:
-  minDisk: 50GB
-  minMemory: 4GB
-```
-
-### Mempool
-
-```yaml
-# app-definitions/mempool/manifest.yaml
-
-name: mempool
-displayName: Mempool Explorer
-description: Bitcoin blockchain explorer and mempool visualizer
-version: 3.2.1
-category: explorer
-
-source:
-  type: git
-  githubRepo: mempool/mempool
-  gitUrl: https://github.com/mempool/mempool.git
-  tagPrefix: v
-
-requires:
-  - service: bitcoin-rpc
-    locality: any-server
-    injectAs:
-      host: CORE_RPC_HOST
-      port: CORE_RPC_PORT
-      credentials:
-        rpcuser: CORE_RPC_USERNAME
-        rpcpassword: CORE_RPC_PASSWORD
-  - service: electrs-rpc
-    locality: any-server
-    injectAs:
-      host: ELECTRUM_HOST
-      port: ELECTRUM_PORT
-
-provides:
-  - name: mempool-api
-    port: 8999
-    protocol: http
-
-webui:
-  enabled: true
-  port: 3006
-  basePath: /apps/mempool
-
-tor:
-  - name: mempool
-    virtualPort: 443
-    targetPort: 3006
-
-configSchema:
-  - name: network
-    type: string
-    inheritFrom: bitcoin.network
+    label: Shared Buffers
+    default: "256MB"
   - name: db_password
     type: password
     generated: true
@@ -1160,7 +670,91 @@ configSchema:
 
 resources:
   minDisk: 10GB
-  minMemory: 2GB
+  minMemory: 512MB
+```
+
+### Redis
+
+```yaml
+# app-definitions/redis/manifest.yaml
+
+name: redis
+displayName: Redis
+description: In-memory data structure store
+version: 7.2.4
+category: database
+
+source:
+  type: apt
+  package: redis-server
+
+provides:
+  - name: redis-cache
+    port: 6379
+    protocol: tcp
+    credentials:
+      type: password
+      fields: [password]
+
+configSchema:
+  - name: maxmemory
+    type: string
+    label: Max Memory
+    default: "256mb"
+  - name: redis_password
+    type: password
+    generated: true
+    secret: true
+
+resources:
+  minMemory: 256MB
+```
+
+### Grafana
+
+```yaml
+# app-definitions/grafana/manifest.yaml
+
+name: grafana
+displayName: Grafana
+description: Analytics and monitoring platform
+version: 10.3.3
+category: monitoring
+
+source:
+  type: binary
+  downloadUrl: "https://dl.grafana.com/oss/release/grafana-${version}.linux-amd64.tar.gz"
+
+requires:
+  - service: postgres-db
+    locality: any-server
+    optional: true
+    injectAs:
+      host: GF_DATABASE_HOST
+      port: GF_DATABASE_PORT
+      credentials:
+        username: GF_DATABASE_USER
+        password: GF_DATABASE_PASSWORD
+
+provides:
+  - name: grafana-api
+    port: 3000
+    protocol: http
+
+webui:
+  enabled: true
+  port: 3000
+  basePath: /apps/grafana
+
+configSchema:
+  - name: admin_password
+    type: password
+    generated: true
+    secret: true
+
+resources:
+  minDisk: 5GB
+  minMemory: 256MB
 ```
 
 ## GUI Wireframes
@@ -1183,19 +777,19 @@ resources:
 │            │  APPS WITH WEB UI                                      │
 │            │  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
 │            │  │ ░░░░░░░░ │  │ ░░░░░░░░ │  │ ░░░░░░░░ │            │
-│            │  │ Mempool  │  │   RTL    │  │ Thunder  │            │
-│            │  │ server-1 │  │ server-2 │  │   Hub    │            │
+│            │  │ Grafana  │  │ Adminer  │  │ PgAdmin  │            │
+│            │  │ server-1 │  │ server-2 │  │ server-1 │            │
 │            │  │  [Open]  │  │  [Open]  │  │  [Open]  │            │
 │            │  └──────────┘  └──────────┘  └──────────┘            │
 │            │                                                        │
 │            │  ALL DEPLOYMENTS                                       │
 │            │  ┌─────────────────────────────────────────────────┐  │
 │            │  │ App       Server     Status     Version         │  │
-│            │  │ bitcoin   core       ● Synced   29.2            │  │
-│            │  │ electrs   server-1   ● Indexed  0.11.0          │  │
-│            │  │ mempool   server-1   ● Running  3.2.1           │  │
-│            │  │ lnd       server-2   ● Running  0.18.0          │  │
-│            │  │ rtl       server-2   ● Running  0.15.0          │  │
+│            │  │ postgres  core       ● Running  16.2            │  │
+│            │  │ redis     server-1   ● Running  7.2.4           │  │
+│            │  │ grafana   server-1   ● Running  10.3.3          │  │
+│            │  │ nginx     server-2   ● Running  1.24.0          │  │
+│            │  │ adminer   server-2   ● Running  4.8.1           │  │
 │            │  └─────────────────────────────────────────────────┘  │
 └────────────┴────────────────────────────────────────────────────────┘
 ```
@@ -1204,28 +798,22 @@ resources:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Install Electrs                                              [X]  │
+│  Install Grafana                                              [X]  │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  Version:  [0.11.0 (latest) ▼]                                     │
+│  Version:  [10.3.3 (latest) ▼]                                     │
 │  Server:   [server-1 ▼]                                            │
 │                                                                     │
 │  DEPENDENCIES                                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │ ✓ bitcoin-rpc                                               │   │
-│  │   Provided by: bitcoin on core (127.0.0.1:8332)             │   │
+│  │ ✓ postgres-db (optional)                                    │   │
+│  │   Provided by: postgres on core (127.0.0.1:5432)           │   │
 │  │   ⚠ Different server - connection via LAN                   │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 │  CONFIGURATION                                                      │
 │  ┌─────────────────────────────────────────────────────────────┐   │
-│  │ Network:    [mainnet]     (from bitcoin)                    │   │
-│  │ Log Level:  [INFO ▼]                                        │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  TOR                                                                │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │ [✓] electrs (50001)                                         │   │
+│  │ Admin Password: [auto-generated]                            │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 │                                      [Cancel]    [Install]         │
@@ -1291,40 +879,6 @@ ORCHESTRATOR_URL=http://localhost:3001
 EOF
 
 # Systemd services
-cat > /etc/systemd/system/ownprem-orchestrator.service << 'EOF'
-[Unit]
-Description=Ownprem Orchestrator
-After=network.target
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/ownprem/orchestrator.env
-WorkingDirectory=/opt/ownprem/orchestrator
-ExecStart=/usr/bin/node index.js
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > /etc/systemd/system/ownprem-agent.service << 'EOF'
-[Unit]
-Description=Ownprem Agent
-After=network.target ownprem-orchestrator.service
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/ownprem/agent.env
-WorkingDirectory=/opt/ownprem/agent
-ExecStart=/usr/bin/node index.js
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 systemctl daemon-reload
 systemctl enable ownprem-orchestrator ownprem-agent caddy
 systemctl start ownprem-orchestrator ownprem-agent caddy
@@ -1335,253 +889,15 @@ echo "Ownprem installed!"
 echo "Access at: http://${IP}:3000"
 ```
 
-### Server (agent only)
-
-```bash
-#!/bin/bash
-# scripts/bootstrap-server.sh
-# Usage: ./bootstrap-server.sh --orchestrator https://ownprem.local:3000 --token <token>
-
-set -e
-
-ORCHESTRATOR_URL=""
-AUTH_TOKEN=""
-SERVER_ID=""
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --orchestrator) ORCHESTRATOR_URL="$2"; shift 2 ;;
-    --token) AUTH_TOKEN="$2"; shift 2 ;;
-    --id) SERVER_ID="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-
-if [[ -z "$ORCHESTRATOR_URL" || -z "$AUTH_TOKEN" ]]; then
-  echo "Usage: $0 --orchestrator <url> --token <token> [--id <server-id>]"
-  exit 1
-fi
-
-SERVER_ID="${SERVER_ID:-server-$(hostname -s)}"
-
-echo "Installing Ownprem Agent..."
-
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
-
-# Create directories
-mkdir -p /opt/ownprem/{agent,apps}
-mkdir -p /etc/ownprem
-
-# Download agent from orchestrator
-curl -sSL "${ORCHESTRATOR_URL}/agent/bundle.tar.gz" | tar -xz -C /opt/ownprem/agent
-
-# Config
-cat > /etc/ownprem/agent.env << EOF
-SERVER_ID=${SERVER_ID}
-ORCHESTRATOR_URL=${ORCHESTRATOR_URL}
-AUTH_TOKEN=${AUTH_TOKEN}
-EOF
-
-chmod 600 /etc/ownprem/agent.env
-
-# Systemd service
-cat > /etc/systemd/system/ownprem-agent.service << 'EOF'
-[Unit]
-Description=Ownprem Agent
-After=network.target
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/ownprem/agent.env
-WorkingDirectory=/opt/ownprem/agent
-ExecStart=/usr/bin/node index.js
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable ownprem-agent
-systemctl start ownprem-agent
-
-echo ""
-echo "Agent installed and connected to orchestrator as: ${SERVER_ID}"
-```
-
-## CLAUDE.md
-
-```markdown
-# Ownprem - Development Guide
-
-## Overview
-Sovereign Bitcoin infrastructure platform. Orchestrator manages
-servers running Bitcoin apps. Single entry point with reverse proxy to all app UIs.
-
-## Architecture
-- **Orchestrator**: Central control - one per deployment, runs on core server
-- **Server**: App server - runs agent + apps (core, server-1, server-2...)
-- **App**: Bitcoin services (bitcoin, electrs, mempool, lnd...)
-
-Orchestrator ALWAYS talks to agent, even on localhost. Same code path everywhere.
-
-## Key Directories
-- `apps/orchestrator/` - API, WebSocket, database, secrets, proxy
-- `apps/agent/` - Executor, reporter (runs on all servers)
-- `apps/ui/` - React frontend
-- `packages/shared/` - TypeScript types
-- `app-definitions/` - App manifests + install scripts
-
-## Commands
-```bash
-npm run dev              # Full stack development
-npm run dev:orchestrator # Orchestrator only
-npm run dev:agent        # Agent only  
-npm run dev:ui           # Frontend only
-npm run build            # Production build
-npm run test             # Run tests
-npm run typecheck        # TypeScript check
-```
-
-## Test VMs
-- core: 10.100.6.60 (orchestrator + agent)
-- server-1: 10.100.6.61 (agent only)
-
-## Database
-SQLite at /var/lib/ownprem/db.sqlite
-Schema in apps/orchestrator/src/db/schema.sql
-
-## Key Flows
-
-### Install App
-1. UI calls POST /api/deployments
-2. Orchestrator validates dependencies
-3. Orchestrator generates credentials
-4. Orchestrator resolves config (user + deps + secrets)
-5. Orchestrator renders templates
-6. Orchestrator sends 'install' command via WebSocket
-7. Agent writes files, runs scripts
-8. Agent reports status
-9. Orchestrator updates proxy routes (if app has webui)
-
-### Proxy
-Caddy on core server. Config rebuilt when apps start/stop.
-- / → UI
-- /api/* → Orchestrator API
-- /apps/mempool/* → server-1:3006
-- /apps/rtl/* → server-2:3000
-
-## Current Phase
-Phase 1: Foundation
-- [ ] Shared types
-- [ ] Database schema
-- [ ] Basic API (servers CRUD)
-- [ ] Agent connection
-```
-
-## Implementation Order
-
-### Phase 1: Foundation (Local Ubuntu)
-
-All development on local Ubuntu machine, all-in-one mode.
-
-1. **Shared types package**
-   - TypeScript interfaces
-   - Zod validation schemas
-
-2. **Database + API skeleton**
-   - SQLite schema
-   - Express server
-   - Basic server CRUD
-
-3. **Agent communication**
-   - WebSocket setup (Socket.io)
-   - Agent connection handshake
-   - Command/response flow
-
-4. **Mock app**
-   - Simple test app (no real Bitcoin)
-   - Test full install flow locally
-
-### Phase 2: Core Features (Local Ubuntu)
-
-5. **App management**
-   - App registry (load manifests)
-   - Config renderer (Nunjucks)
-   - Basic deployer
-
-6. **Secrets**
-   - Generation
-   - AES-256-GCM encryption
-   - Storage + retrieval
-
-7. **Dependencies**
-   - Dependency resolver
-   - Service registry
-   - Credential injection
-
-8. **Proxy**
-   - Caddy config generator
-   - Dynamic route updates
-
-### Phase 3: Frontend (Local Ubuntu)
-
-9. **React UI**
-   - Vite setup
-   - Dashboard
-   - Server/app views
-   - Install flow
-
-10. **Real-time updates**
-    - WebSocket integration
-    - Status updates
-    - Log streaming
-
-### Phase 4: Multi-Node (Debian VMs)
-
-11. **Deploy to Debian VMs**
-    - core VM (orchestrator + agent)
-    - server-1 VM (agent only)
-    - Test cross-server communication
-
-12. **Install scripts**
-    - install.sh
-    - bootstrap-server.sh
-    - Bootstrap flow
-
-### Phase 5: Real Apps
-
-13. **Bitcoin (regtest first)**
-    - Test with regtest (instant blocks)
-    - Then signet/testnet
-    - Finally mainnet
-
-14. **Electrs, Mempool, etc.**
-    - Add real app definitions
-    - Test dependency chain
-
-### Phase 6: Polish
-
-15. **Production hardening**
-    - Tor integration
-    - TLS/certificates
-    - Auth improvements
-    - Error recovery
-    - Updates/upgrades
-
-
 ## Mock App for Testing
 
-Use mock apps during development to test the platform without real Bitcoin:
+Use mock apps during development to test the platform:
 
 ```yaml
 # app-definitions/mock-app/manifest.yaml
 
 name: mock-app
-displayName: Mock App  
+displayName: Mock App
 description: Simple test app for platform development
 version: 1.0.0
 category: utility
@@ -1601,73 +917,6 @@ configSchema:
     type: string
     label: Welcome Message
     default: "Hello from Mock App"
-```
-
-```bash
-# app-definitions/mock-app/install.sh
-#!/bin/bash
-set -e
-
-APP_DIR="/opt/ownprem/apps/mock-app"
-mkdir -p "$APP_DIR"
-
-cat > "$APP_DIR/server.js" << 'EOF'
-const http = require('http');
-const msg = process.env.MESSAGE || 'Mock App Running';
-
-const server = http.createServer((req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.end(`
-    <!DOCTYPE html>
-    <html>
-    <head><title>Mock App</title></head>
-    <body>
-      <h1>${msg}</h1>
-      <p>Mock app is running successfully!</p>
-      <p>Server: ${process.env.SERVER_ID || 'unknown'}</p>
-    </body>
-    </html>
-  `);
-});
-
-server.listen(9999, () => {
-  console.log('Mock app listening on port 9999');
-});
-EOF
-
-# Create systemd service
-cat > /etc/systemd/system/mock-app.service << EOF
-[Unit]
-Description=Mock App
-After=network.target
-
-[Service]
-Type=simple
-Environment=MESSAGE=${MESSAGE:-Hello from Mock App}
-ExecStart=/usr/bin/node ${APP_DIR}/server.js
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-```
-
-```bash
-# app-definitions/mock-app/configure.sh
-#!/bin/bash
-systemctl restart mock-app
-```
-
-```bash
-# app-definitions/mock-app/uninstall.sh
-#!/bin/bash
-systemctl stop mock-app || true
-systemctl disable mock-app || true
-rm -f /etc/systemd/system/mock-app.service
-rm -rf /opt/ownprem/apps/mock-app
-systemctl daemon-reload
 ```
 
 ## Mock Dependency App
@@ -1708,4 +957,4 @@ configSchema:
     label: Upstream Port
 ```
 
-This lets you test the full dependency chain without real Bitcoin.
+This lets you test the full dependency chain without any specific application dependencies.

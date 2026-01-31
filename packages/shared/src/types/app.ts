@@ -3,7 +3,7 @@ export interface AppManifest {
   displayName: string;
   description: string;
   version: string;
-  category: 'bitcoin' | 'lightning' | 'indexer' | 'explorer' | 'utility' | 'system';
+  category: 'database' | 'web' | 'networking' | 'monitoring' | 'utility' | 'system';
 
   // System app flags
   system?: boolean;      // Part of OwnPrem infrastructure
