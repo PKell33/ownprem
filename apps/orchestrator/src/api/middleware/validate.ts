@@ -1,5 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { z, ZodSchema, ZodError } from 'zod';
+import { Errors } from './error.js';
+
+/**
+ * Format Zod errors into a consistent details structure.
+ */
+function formatZodErrors(err: ZodError): Array<{ path: string; message: string }> {
+  return err.errors.map(e => ({
+    path: e.path.join('.'),
+    message: e.message,
+  }));
+}
 
 /**
  * Middleware factory for validating request body with Zod schemas
@@ -11,16 +22,7 @@ export function validateBody<T>(schema: ZodSchema<T>) {
       next();
     } catch (err) {
       if (err instanceof ZodError) {
-        res.status(400).json({
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid request body',
-            details: err.errors.map(e => ({
-              path: e.path.join('.'),
-              message: e.message,
-            })),
-          },
-        });
+        next(Errors.validation('Invalid request body', formatZodErrors(err)));
         return;
       }
       next(err);
@@ -38,16 +40,7 @@ export function validateParams<T>(schema: ZodSchema<T>) {
       next();
     } catch (err) {
       if (err instanceof ZodError) {
-        res.status(400).json({
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid request parameters',
-            details: err.errors.map(e => ({
-              path: e.path.join('.'),
-              message: e.message,
-            })),
-          },
-        });
+        next(Errors.validation('Invalid request parameters', formatZodErrors(err)));
         return;
       }
       next(err);
@@ -65,16 +58,7 @@ export function validateQuery<T>(schema: ZodSchema<T>) {
       next();
     } catch (err) {
       if (err instanceof ZodError) {
-        res.status(400).json({
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid query parameters',
-            details: err.errors.map(e => ({
-              path: e.path.join('.'),
-              message: e.message,
-            })),
-          },
-        });
+        next(Errors.validation('Invalid query parameters', formatZodErrors(err)));
         return;
       }
       next(err);

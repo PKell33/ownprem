@@ -1,25 +1,26 @@
 import { Router, Response, NextFunction } from 'express';
 import { certificateAuthority } from '../../services/certificateAuthority.js';
 import { getRenewalStatus, triggerRenewalCheck } from '../../jobs/certRenewal.js';
-import { createError } from '../middleware/error.js';
+import { createError, Errors, createTypedError } from '../middleware/error.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { csrfProtection } from '../middleware/csrf.js';
 import { auditService } from '../../services/auditService.js';
+import { ErrorCodes } from '@ownprem/shared';
 
 const router = Router();
 
 // Helper: Check if user can manage certificates (system admin only)
 function canManageCertificates(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   if (!req.user) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    res.status(401).json({ error: { code: ErrorCodes.UNAUTHORIZED, message: 'Authentication required' } });
     return;
   }
   if (req.user.isSystemAdmin) {
     next();
     return;
   }
-  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'System admin permission required' } });
+  res.status(403).json({ error: { code: ErrorCodes.FORBIDDEN, message: 'System admin permission required' } });
 }
 
 // GET /api/certificates - List all certificates
@@ -51,7 +52,7 @@ router.get('/ca', requireAuth, async (req, res, next) => {
     const caCert = await certificateAuthority.getCACertificate();
 
     if (!caCert) {
-      throw createError('CA certificate not available', 404, 'CA_NOT_FOUND');
+      throw createTypedError(ErrorCodes.CA_NOT_INITIALIZED, 'CA certificate not available');
     }
 
     // Return as PEM or JSON based on Accept header

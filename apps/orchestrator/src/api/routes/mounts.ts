@@ -1,13 +1,14 @@
 import { Router, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/index.js';
-import { createError } from '../middleware/error.js';
+import { createError, Errors, createTypedError } from '../middleware/error.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { auditService } from '../../services/auditService.js';
 import { secretsManager } from '../../services/secretsManager.js';
 import { sendMountCommand, isAgentConnected } from '../../websocket/agentHandler.js';
 import { apiLogger } from '../../lib/logger.js';
+import { ErrorCodes } from '@ownprem/shared';
 import type { Mount, ServerMount, ServerMountWithDetails, MountType, MountStatus } from '@ownprem/shared';
 
 const router = Router();
@@ -15,14 +16,14 @@ const router = Router();
 // Helper: Check if user can manage mounts (system admin only)
 function canManageMounts(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   if (!req.user) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    res.status(401).json({ error: { code: ErrorCodes.UNAUTHORIZED, message: 'Authentication required' } });
     return;
   }
   if (req.user.isSystemAdmin) {
     next();
     return;
   }
-  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'System admin permission required' } });
+  res.status(403).json({ error: { code: ErrorCodes.FORBIDDEN, message: 'System admin permission required' } });
 }
 
 // ==================

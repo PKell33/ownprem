@@ -1,24 +1,25 @@
 import { Router, Response, NextFunction } from 'express';
 import { randomBytes } from 'crypto';
 import { getDb } from '../../db/index.js';
-import { createError } from '../middleware/error.js';
+import { Errors, createTypedError } from '../middleware/error.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { hashToken } from '../../websocket/agentHandler.js';
 import { parsePaginationParams, paginateOrReturnAll } from '../../lib/pagination.js';
+import { ErrorCodes } from '@ownprem/shared';
 import type { Server, ServerMetrics, NetworkInfo } from '@ownprem/shared';
 
 // Helper: Check if user can manage servers (system admin only for now)
 function canManageServers(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   if (!req.user) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    res.status(401).json({ error: { code: ErrorCodes.UNAUTHORIZED, message: 'Authentication required' } });
     return;
   }
   if (req.user.isSystemAdmin) {
     next();
     return;
   }
-  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'System admin permission required' } });
+  res.status(403).json({ error: { code: ErrorCodes.FORBIDDEN, message: 'System admin permission required' } });
 }
 
 const router = Router();
@@ -76,7 +77,7 @@ router.post('/', requireAuth, canManageServers, validateBody(schemas.servers.cre
 
   const existing = db.prepare('SELECT id FROM servers WHERE id = ? OR name = ?').get(id, name);
   if (existing) {
-    throw createError('Server with this name already exists', 409, 'SERVER_EXISTS');
+    throw createTypedError(ErrorCodes.SERVER_EXISTS, 'Server with this name already exists');
   }
 
   // Store the hashed token in the database
@@ -104,7 +105,7 @@ router.get('/:id', requireAuth, validateParams(schemas.serverIdParam), (req, res
   const row = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
 
   if (!row) {
-    throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+    throw Errors.serverNotFound(req.params.id);
   }
 
   res.json(rowToServer(row));
@@ -117,11 +118,11 @@ router.put('/:id', requireAuth, canManageServers, validateParams(schemas.serverI
 
   const existing = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
   if (!existing) {
-    throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+    throw Errors.serverNotFound(req.params.id);
   }
 
   if (existing.is_core) {
-    throw createError('Cannot modify core server', 400, 'CANNOT_MODIFY_CORE');
+    throw createTypedError(ErrorCodes.CANNOT_MODIFY_CORE, 'Cannot modify core server');
   }
 
   const updates: string[] = [];
@@ -137,7 +138,7 @@ router.put('/:id', requireAuth, canManageServers, validateParams(schemas.serverI
   }
 
   if (updates.length === 0) {
-    throw createError('No fields to update', 400, 'NO_UPDATES');
+    throw Errors.validation('No fields to update');
   }
 
   updates.push('updated_at = CURRENT_TIMESTAMP');
@@ -156,11 +157,11 @@ router.delete('/:id', requireAuth, canManageServers, validateParams(schemas.serv
 
   const existing = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
   if (!existing) {
-    throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+    throw Errors.serverNotFound(req.params.id);
   }
 
   if (existing.is_core) {
-    throw createError('Cannot delete core server', 400, 'CANNOT_DELETE_CORE');
+    throw createTypedError(ErrorCodes.CANNOT_DELETE_CORE, 'Cannot delete core server');
   }
 
   db.prepare('DELETE FROM servers WHERE id = ?').run(req.params.id);
@@ -173,11 +174,11 @@ router.post('/:id/regenerate-token', requireAuth, canManageServers, validatePara
 
   const existing = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id) as ServerRow | undefined;
   if (!existing) {
-    throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+    throw Errors.serverNotFound(req.params.id);
   }
 
   if (existing.is_core) {
-    throw createError('Cannot regenerate token for core server', 400, 'CANNOT_MODIFY_CORE');
+    throw createTypedError(ErrorCodes.CANNOT_MODIFY_CORE, 'Cannot regenerate token for core server');
   }
 
   // Generate new token
@@ -211,7 +212,7 @@ router.get('/:id/tokens', requireAuth, canManageServers, validateParams(schemas.
     // Verify server exists
     const existing = db.prepare('SELECT id FROM servers WHERE id = ?').get(req.params.id);
     if (!existing) {
-      throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+      throw Errors.serverNotFound(req.params.id);
     }
 
     const { agentTokenService } = await import('../../services/agentTokenService.js');
@@ -231,11 +232,11 @@ router.post('/:id/tokens', requireAuth, canManageServers, validateParams(schemas
     // Verify server exists
     const existing = db.prepare('SELECT id, is_core FROM servers WHERE id = ?').get(req.params.id) as { id: string; is_core: number } | undefined;
     if (!existing) {
-      throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+      throw Errors.serverNotFound(req.params.id);
     }
 
     if (existing.is_core) {
-      throw createError('Cannot create tokens for core server', 400, 'CANNOT_MODIFY_CORE');
+      throw createTypedError(ErrorCodes.CANNOT_MODIFY_CORE, 'Cannot create tokens for core server');
     }
 
     const { agentTokenService } = await import('../../services/agentTokenService.js');
@@ -266,7 +267,7 @@ router.delete('/:id/tokens/:tokenId', requireAuth, canManageServers, validatePar
     // Verify server exists
     const existing = db.prepare('SELECT id FROM servers WHERE id = ?').get(req.params.id);
     if (!existing) {
-      throw createError('Server not found', 404, 'SERVER_NOT_FOUND');
+      throw Errors.serverNotFound(req.params.id);
     }
 
     const { agentTokenService } = await import('../../services/agentTokenService.js');
@@ -277,7 +278,7 @@ router.delete('/:id/tokens/:tokenId', requireAuth, canManageServers, validatePar
     );
 
     if (!revoked) {
-      throw createError('Token not found', 404, 'TOKEN_NOT_FOUND');
+      throw Errors.notFound('Token', req.params.tokenId);
     }
 
     res.status(204).send();

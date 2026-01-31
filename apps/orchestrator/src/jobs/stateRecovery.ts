@@ -5,6 +5,7 @@ import { updateDeploymentStatus } from '../lib/deploymentHelpers.js';
 import { auditService } from '../services/auditService.js';
 import logger from '../lib/logger.js';
 import { v4 as uuidv4 } from 'uuid';
+import { TRANSIENT_DEPLOYMENT_STATES } from '@ownprem/shared';
 
 export interface RecoveryResult {
   deploymentId: string;
@@ -41,8 +42,8 @@ interface ServerStatusRow {
   agent_status: string;
 }
 
-// Transient states that indicate an operation was in progress
-const TRANSIENT_STATES = ['installing', 'configuring', 'uninstalling'];
+// Use shared transient states constant
+const TRANSIENT_STATES = TRANSIENT_DEPLOYMENT_STATES;
 
 interface PendingCommandRow {
   id: string;
@@ -65,7 +66,7 @@ class StateRecoveryService {
    * Check if a deployment status is transient (in-progress operation).
    */
   isTransientState(status: string): boolean {
-    return TRANSIENT_STATES.includes(status);
+    return (TRANSIENT_STATES as readonly string[]).includes(status);
   }
 
   /**

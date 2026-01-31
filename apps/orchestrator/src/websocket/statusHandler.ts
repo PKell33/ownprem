@@ -10,6 +10,7 @@ import { mutexManager } from '../lib/mutexManager.js';
 import { proxyManager } from '../services/proxyManager.js';
 import { broadcastDeploymentStatus } from './index.js';
 import type { AgentStatusReport } from '@ownprem/shared';
+import { AppStatusValues, DeploymentStatusValues, TRANSIENT_DEPLOYMENT_STATES } from '@ownprem/shared';
 import type { DeploymentRow } from './agentTypes.js';
 
 /**
@@ -17,10 +18,10 @@ import type { DeploymentRow } from './agentTypes.js';
  */
 function mapAppStatusToDeploymentStatus(appStatus: string): string {
   switch (appStatus) {
-    case 'running': return 'running';
-    case 'stopped': return 'stopped';
-    case 'error': return 'error';
-    default: return 'stopped';
+    case AppStatusValues.RUNNING: return DeploymentStatusValues.RUNNING;
+    case AppStatusValues.STOPPED: return DeploymentStatusValues.STOPPED;
+    case AppStatusValues.ERROR: return DeploymentStatusValues.ERROR;
+    default: return DeploymentStatusValues.STOPPED;
   }
 }
 
@@ -92,10 +93,10 @@ export async function handleStatusReport(
     const newStatus = mapAppStatusToDeploymentStatus(app.status);
     const previousStatus = deployment.status;
     const hasRoute = deployment.route_active !== null;
-    const shouldRouteBeActive = newStatus === 'running';
+    const shouldRouteBeActive = newStatus === DeploymentStatusValues.RUNNING;
 
     // Skip if already in a transitional state
-    if (['installing', 'configuring', 'uninstalling'].includes(previousStatus)) {
+    if (TRANSIENT_DEPLOYMENT_STATES.includes(previousStatus as typeof TRANSIENT_DEPLOYMENT_STATES[number])) {
       continue;
     }
 
@@ -117,7 +118,7 @@ export async function handleStatusReport(
     await mutexManager.withDeploymentLock(change.deploymentId, async () => {
       // Re-check status in case it changed while waiting for lock
       const current = db.prepare('SELECT status FROM deployments WHERE id = ?').get(change.deploymentId) as { status: string } | undefined;
-      if (!current || ['installing', 'configuring', 'uninstalling'].includes(current.status)) {
+      if (!current || TRANSIENT_DEPLOYMENT_STATES.includes(current.status as typeof TRANSIENT_DEPLOYMENT_STATES[number])) {
         return;
       }
 

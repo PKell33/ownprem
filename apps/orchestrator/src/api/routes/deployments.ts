@@ -4,7 +4,7 @@ import { deployer } from '../../services/deployer.js';
 import { dependencyResolver } from '../../services/dependencyResolver.js';
 import { serviceRegistry } from '../../services/serviceRegistry.js';
 import { getDb } from '../../db/index.js';
-import { createError } from '../middleware/error.js';
+import { Errors } from '../middleware/error.js';
 import { validateBody, validateParams, validateQuery, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { authService } from '../../services/authService.js';
@@ -12,6 +12,7 @@ import { requestLogs } from '../../websocket/agentHandler.js';
 import { parsePaginationParams, paginateOrReturnAll } from '../../lib/pagination.js';
 import { validateUserConfig } from '../../services/configValidator.js';
 import { apiLogger } from '../../lib/logger.js';
+import { ErrorCodes } from '@ownprem/shared';
 import type { AppManifest } from '@ownprem/shared';
 
 // Infer the validated query type from the schema
@@ -24,7 +25,7 @@ const router = Router();
 // For existing deployments, checks if user is admin for the deployment's group
 async function canManageDeployment(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   if (!req.user) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    res.status(401).json({ error: { code: ErrorCodes.UNAUTHORIZED, message: 'Authentication required' } });
     return;
   }
 
@@ -42,7 +43,7 @@ async function canManageDeployment(req: AuthenticatedRequest, res: Response, nex
       next();
       return;
     }
-    res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Admin permission required for this group' } });
+    res.status(403).json({ error: { code: ErrorCodes.FORBIDDEN, message: 'Admin permission required for this group' } });
     return;
   }
 
@@ -51,7 +52,7 @@ async function canManageDeployment(req: AuthenticatedRequest, res: Response, nex
   if (deploymentId) {
     const deployment = await deployer.getDeployment(deploymentId);
     if (!deployment) {
-      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Deployment not found' } });
+      res.status(404).json({ error: { code: ErrorCodes.DEPLOYMENT_NOT_FOUND, message: 'Deployment not found' } });
       return;
     }
 
@@ -63,13 +64,13 @@ async function canManageDeployment(req: AuthenticatedRequest, res: Response, nex
     }
   }
 
-  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Admin permission required for this group' } });
+  res.status(403).json({ error: { code: ErrorCodes.FORBIDDEN, message: 'Admin permission required for this group' } });
 }
 
 // Helper: Check if user can operate a deployment (start, stop, restart)
 async function canOperateDeployment(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   if (!req.user) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    res.status(401).json({ error: { code: ErrorCodes.UNAUTHORIZED, message: 'Authentication required' } });
     return;
   }
 
@@ -83,7 +84,7 @@ async function canOperateDeployment(req: AuthenticatedRequest, res: Response, ne
   const deploymentId = req.params.id;
   const deployment = await deployer.getDeployment(deploymentId);
   if (!deployment) {
-    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Deployment not found' } });
+    res.status(404).json({ error: { code: ErrorCodes.DEPLOYMENT_NOT_FOUND, message: 'Deployment not found' } });
     return;
   }
 
@@ -96,7 +97,7 @@ async function canOperateDeployment(req: AuthenticatedRequest, res: Response, ne
     return;
   }
 
-  res.status(403).json({ error: { code: 'FORBIDDEN', message: 'Operator permission required for this group' } });
+  res.status(403).json({ error: { code: ErrorCodes.FORBIDDEN, message: 'Operator permission required for this group' } });
 }
 
 interface AppRegistryRow {
@@ -110,7 +111,7 @@ async function checkNotMandatory(req: AuthenticatedRequest, res: Response, next:
   const deployment = await deployer.getDeployment(deploymentId);
 
   if (!deployment) {
-    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Deployment not found' } });
+    res.status(404).json({ error: { code: ErrorCodes.DEPLOYMENT_NOT_FOUND, message: 'Deployment not found' } });
     return;
   }
 
@@ -120,9 +121,9 @@ async function checkNotMandatory(req: AuthenticatedRequest, res: Response, next:
   if (appRow) {
     const manifest = JSON.parse(appRow.manifest) as AppManifest;
     if (manifest.mandatory) {
-      res.status(403).json({
+      res.status(422).json({
         error: {
-          code: 'MANDATORY_APP',
+          code: ErrorCodes.MANDATORY_APP,
           message: `${manifest.displayName || deployment.appName} is a mandatory system app and cannot be stopped or uninstalled`
         }
       });
@@ -169,14 +170,14 @@ router.post('/', requireAuth, validateBody(schemas.deployments.create), canManag
     const db = getDb();
     const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(appName) as AppRegistryRow | undefined;
     if (!appRow) {
-      throw createError(`App "${appName}" not found`, 404, 'APP_NOT_FOUND');
+      throw Errors.appNotFound(appName);
     }
 
     const manifest = JSON.parse(appRow.manifest) as AppManifest;
     if (manifest.configSchema && config) {
       const validation = validateUserConfig(config, manifest.configSchema);
       if (!validation.valid) {
-        throw createError('Invalid configuration', 400, 'CONFIG_VALIDATION_ERROR', validation.errors);
+        throw Errors.configValidation('Invalid configuration', validation.errors);
       }
     }
 
@@ -196,7 +197,7 @@ router.post('/validate', requireAuth, validateBody(schemas.deployments.validate)
     const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(appName) as AppRegistryRow | undefined;
 
     if (!appRow) {
-      throw createError(`App ${appName} not found`, 404, 'APP_NOT_FOUND');
+      throw Errors.appNotFound(appName);
     }
 
     const manifest = JSON.parse(appRow.manifest) as AppManifest;
@@ -232,7 +233,7 @@ router.get('/:id', requireAuth, validateParams(schemas.idParam), async (req: Aut
     const deployment = await deployer.getDeployment(req.params.id);
 
     if (!deployment) {
-      throw createError('Deployment not found', 404, 'DEPLOYMENT_NOT_FOUND');
+      throw Errors.deploymentNotFound(req.params.id);
     }
 
     // Check if user has access to this deployment's group
@@ -240,7 +241,7 @@ router.get('/:id', requireAuth, validateParams(schemas.idParam), async (req: Aut
       const groupId = deployment.groupId || 'default';
       const role = authService.getUserRoleInGroup(req.user!.userId, groupId);
       if (!role) {
-        throw createError('Deployment not found', 404, 'DEPLOYMENT_NOT_FOUND');
+        throw Errors.deploymentNotFound(req.params.id);
       }
     }
 
@@ -262,13 +263,13 @@ router.put('/:id', requireAuth, validateParams(schemas.idParam), canManageDeploy
     const { config } = req.body;
 
     if (!config || typeof config !== 'object') {
-      throw createError('config object is required', 400, 'INVALID_CONFIG');
+      throw Errors.validation('config object is required');
     }
 
     // Get deployment to find app name
     const existingDeployment = await deployer.getDeployment(req.params.id);
     if (!existingDeployment) {
-      throw createError('Deployment not found', 404, 'DEPLOYMENT_NOT_FOUND');
+      throw Errors.deploymentNotFound(req.params.id);
     }
 
     // Validate user config against manifest schema
@@ -279,7 +280,7 @@ router.put('/:id', requireAuth, validateParams(schemas.idParam), canManageDeploy
       if (manifest.configSchema) {
         const validation = validateUserConfig(config, manifest.configSchema);
         if (!validation.valid) {
-          throw createError('Invalid configuration', 400, 'CONFIG_VALIDATION_ERROR', validation.errors);
+          throw Errors.configValidation('Invalid configuration', validation.errors);
         }
       }
     }
@@ -326,7 +327,7 @@ router.get('/:id/logs', requireAuth, validateParams(schemas.idParam), validateQu
   try {
     const deployment = await deployer.getDeployment(req.params.id);
     if (!deployment) {
-      throw createError('Deployment not found', 404, 'DEPLOYMENT_NOT_FOUND');
+      throw Errors.deploymentNotFound(req.params.id);
     }
 
     // Get the manifest for logging config
@@ -383,7 +384,7 @@ router.post('/:id/rotate-secrets', requireAuth, validateParams(schemas.idParam),
     );
 
     if (!result.success) {
-      throw createError(result.error || 'Failed to rotate secrets', 400, 'ROTATION_FAILED');
+      throw Errors.validation(result.error || 'Failed to rotate secrets');
     }
 
     res.json({
@@ -402,14 +403,14 @@ router.get('/:id/connection-info', requireAuth, validateParams(schemas.idParam),
   try {
     const deployment = await deployer.getDeployment(req.params.id);
     if (!deployment) {
-      throw createError('Deployment not found', 404, 'DEPLOYMENT_NOT_FOUND');
+      throw Errors.deploymentNotFound(req.params.id);
     }
 
     // Get the app manifest
     const db = getDb();
     const appRow = db.prepare('SELECT manifest FROM app_registry WHERE name = ?').get(deployment.appName) as AppRegistryRow | undefined;
     if (!appRow) {
-      throw createError('App not found', 404, 'APP_NOT_FOUND');
+      throw Errors.appNotFound(deployment.appName);
     }
     const manifest = JSON.parse(appRow.manifest) as AppManifest;
 

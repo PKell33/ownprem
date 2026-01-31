@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { proxyManager } from '../../services/proxyManager.js';
 import { getDb } from '../../db/index.js';
+import { ErrorCodes } from '@ownprem/shared';
 
 const router = Router();
 
@@ -51,7 +52,7 @@ router.post('/reload', async (_req, res, next) => {
     if (success) {
       res.json({ status: 'ok', message: 'Caddy config updated successfully' });
     } else {
-      res.status(500).json({ error: { code: 'CADDY_UPDATE_FAILED', message: 'Failed to update Caddy config' } });
+      res.status(502).json({ error: { code: ErrorCodes.CADDY_UPDATE_FAILED, message: 'Failed to update Caddy config' } });
     }
   } catch (err) {
     next(err);

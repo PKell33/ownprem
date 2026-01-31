@@ -341,6 +341,59 @@ systemctl restart ownprem-orchestrator
 | `apps/ui/src/App.tsx` | React app entry |
 | `app-definitions/*/manifest.yaml` | App definitions |
 
+## Naming Conventions
+
+Consistent naming improves code readability and reduces cognitive load. Follow these conventions:
+
+### Code Naming
+
+| Context | Convention | Examples |
+|---------|------------|----------|
+| TypeScript files | camelCase | `proxyManager.ts`, `agentHandler.ts` |
+| TypeScript constants (objects) | PascalCase | `ErrorCodes`, `DeploymentStatusValues` |
+| TypeScript types/interfaces | PascalCase | `DeploymentRow`, `ApiError` |
+| Database columns | snake_case | `server_id`, `app_name`, `created_at` |
+| API route paths | kebab-case | `/api/proxy-routes`, `/api/deployments/:id` |
+| Environment variables | SCREAMING_SNAKE_CASE | `AUTH_TOKEN`, `DATA_PATH` |
+
+### Error Codes
+
+All error codes use `UPPER_SNAKE_CASE`:
+- Resource errors: `SERVER_NOT_FOUND`, `DEPLOYMENT_NOT_FOUND`, `APP_NOT_FOUND`
+- Auth errors: `UNAUTHORIZED`, `FORBIDDEN`, `INVALID_TOKEN`
+- Validation errors: `VALIDATION_ERROR`, `CONFIG_VALIDATION_ERROR`
+- Business errors: `CANNOT_DELETE_CORE`, `MANDATORY_APP`, `AGENT_NOT_CONNECTED`
+
+Error codes are defined in `packages/shared/src/constants/errors.ts`.
+
+### Status Values
+
+All status values use lowercase strings matching `[a-z]+`:
+- Deployment: `pending`, `installing`, `running`, `stopped`, `error`
+- Agent: `online`, `offline`, `error`
+- Mount: `mounting`, `mounted`, `unmounted`, `error`
+
+Status constants are defined in `packages/shared/src/constants/status.ts`.
+
+### Service & Resource IDs
+
+| Resource | Pattern | Examples |
+|----------|---------|----------|
+| Server IDs | lowercase alphanumeric with hyphens | `core`, `server-1`, `backup-node` |
+| Deployment IDs | UUID v4 | `550e8400-e29b-41d4-a716-446655440000` |
+| Systemd services | `ownprem-{appname}` prefix | `ownprem-mock-app`, `ownprem-caddy` |
+| App names | lowercase alphanumeric with hyphens | `mock-app`, `bitcoin-core`, `nginx` |
+
+### Directory Structure
+
+| Directory | Purpose | File naming |
+|-----------|---------|-------------|
+| `src/api/routes/` | Express route handlers | `{resource}.ts` (plural) |
+| `src/services/` | Business logic | `{serviceName}.ts` |
+| `src/lib/` | Shared utilities | `{utilityName}.ts` |
+| `src/websocket/` | Socket.IO handlers | `{handler}Handler.ts` |
+| `src/jobs/` | Background jobs | `{jobName}.ts` |
+
 ## Troubleshooting
 
 ### Caddy not proxying routes
