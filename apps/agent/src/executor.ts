@@ -6,7 +6,7 @@
 import { spawnSync, ChildProcess } from 'child_process';
 import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, rmSync } from 'fs';
 import { dirname, resolve } from 'path';
-import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult, LogStreamPayload, LogStreamLine, MountCommandPayload, MountCheckResult } from '@ownprem/shared';
+import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult, LogStreamPayload, LogStreamLine, MountCommandPayload, MountCheckResult, AppMetadata } from '@ownprem/shared';
 import { privilegedClient } from './privilegedClient.js';
 import logger from './lib/logger.js';
 
@@ -201,7 +201,7 @@ export class Executor {
   private async finalizePrivilegedSetup(
     appDir: string,
     appName: string,
-    metadata: Record<string, unknown> | undefined,
+    metadata: AppMetadata | undefined,
     capabilities: string[],
     dataDirectories: Array<{ path: string }>,
     serviceUser: string | undefined,

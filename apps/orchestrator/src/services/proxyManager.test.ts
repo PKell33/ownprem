@@ -421,13 +421,12 @@ describe('ProxyManager', () => {
         id: 'route-1',
         serviceId: 'svc-1',
         serviceName: 'api',
-        deploymentId: 'deploy-1',
         routeType: 'http' as const,
         upstreamHost: '192.168.1.100',
         upstreamPort: 8080,
         externalPath: '/services/api',
-        externalPort: null,
-        active: true,
+        appName: 'test-app',
+        serverName: 'core',
       };
 
       const url = proxyManager.getExternalUrl(serviceRoute);
@@ -439,13 +438,12 @@ describe('ProxyManager', () => {
         id: 'route-1',
         serviceId: 'svc-1',
         serviceName: 'postgres',
-        deploymentId: 'deploy-1',
         routeType: 'tcp' as const,
         upstreamHost: '192.168.1.100',
         upstreamPort: 5432,
-        externalPath: null,
         externalPort: 15432,
-        active: true,
+        appName: 'postgres',
+        serverName: 'core',
       };
 
       const url = proxyManager.getExternalUrl(serviceRoute);

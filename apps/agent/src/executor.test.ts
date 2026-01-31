@@ -222,11 +222,7 @@ env > "${envLogFile}"
 exit 0`, { mode: 0o755 });
 
       await executor.install('env-test-app', {
-        action: 'install',
-        appName: 'env-test-app',
-        payload: {
-          files: [],
-        },
+        files: [],
       });
 
       // Restore original env
@@ -278,9 +274,7 @@ exit 0`, { mode: 0o755 });
     it('should write config files', async () => {
       // First install the app
       await executor.install('config-test-app', {
-        action: 'install',
-        appName: 'config-test-app',
-        payload: { files: [] },
+        files: [],
       });
 
       // Then configure it
