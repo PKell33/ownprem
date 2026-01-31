@@ -26,7 +26,8 @@ export function getIo(): SocketServer {
 }
 
 /**
- * Broadcast deployment status change to all connected UI clients.
+ * Broadcast deployment status change to authenticated UI clients only.
+ * Sensitive information should not be exposed to unauthenticated connections.
  */
 export function broadcastDeploymentStatus(data: {
   deploymentId: string;
@@ -37,7 +38,8 @@ export function broadcastDeploymentStatus(data: {
   routeActive?: boolean;
 }): void {
   if (io) {
-    io.emit('deployment:status', {
+    // Emit only to authenticated clients (joined 'authenticated' room)
+    io.to('authenticated').emit('deployment:status', {
       ...data,
       timestamp: new Date().toISOString(),
     });

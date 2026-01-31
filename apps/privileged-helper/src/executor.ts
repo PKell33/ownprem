@@ -6,8 +6,8 @@
  */
 
 import { spawnSync } from 'child_process';
-import { writeFileSync, mkdirSync, copyFileSync, chmodSync, chownSync, existsSync } from 'fs';
-import { userInfo } from 'os';
+import { writeFileSync, mkdirSync, copyFileSync, chmodSync, chownSync, existsSync, mkdtempSync, unlinkSync, rmdirSync } from 'fs';
+import { tmpdir } from 'os';
 import type {
   HelperRequest,
   HelperResponse,
@@ -23,7 +23,12 @@ import type {
   MountRequest,
   UmountRequest,
   AptInstallRequest,
+  RegisterServiceRequest,
+  UnregisterServiceRequest,
 } from './types.js';
+
+// Directory where registered services are tracked
+const REGISTERED_SERVICES_DIR = '/var/lib/ownprem/services';
 
 function getUserIds(owner: string): { uid: number; gid: number } | null {
   const [user, group] = owner.includes(':') ? owner.split(':') : [owner, owner];
@@ -261,15 +266,24 @@ function mount(req: MountRequest): HelperResponse {
   const args: string[] = ['-t', mountType];
 
   if (mountType === 'cifs' && credentials) {
-    // Write credentials to a temporary file with restricted permissions
-    const credFile = `/tmp/mount-creds-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    let credContent = `username=${credentials.username}\npassword=${credentials.password}\n`;
-    if (credentials.domain) {
-      credContent += `domain=${credentials.domain}\n`;
-    }
+    // Create a secure temporary directory with restricted permissions
+    // Using mkdtempSync ensures unpredictable directory name
+    let credDir: string | null = null;
+    let credFile: string | null = null;
 
     try {
-      writeFileSync(credFile, credContent, { mode: 0o600 });
+      // Create temp directory in /run (tmpfs, not persisted to disk)
+      // Fall back to /tmp if /run is not available
+      const tempBase = existsSync('/run') ? '/run' : tmpdir();
+      credDir = mkdtempSync(`${tempBase}/ownprem-mount-`);
+      credFile = `${credDir}/credentials`;
+
+      // Write credentials with strict permissions (owner read only)
+      let credContent = `username=${credentials.username}\npassword=${credentials.password}\n`;
+      if (credentials.domain) {
+        credContent += `domain=${credentials.domain}\n`;
+      }
+      writeFileSync(credFile, credContent, { mode: 0o400 });
 
       const credOptions = `credentials=${credFile}`;
       const allOptions = options ? `${credOptions},${options}` : credOptions;
@@ -281,28 +295,31 @@ function mount(req: MountRequest): HelperResponse {
         timeout: 30000,
       });
 
-      // Clean up credentials file
-      try {
-        const { unlinkSync } = require('fs');
-        unlinkSync(credFile);
-      } catch {
-        // Ignore deletion errors
-      }
-
       if (result.status !== 0) {
         return { success: false, error: `Mount failed: ${result.stderr || 'Unknown error'}` };
       }
 
       return { success: true, output: `Mounted ${source} at ${mountPoint}` };
     } catch (err) {
-      // Clean up credentials file
-      try {
-        const { unlinkSync } = require('fs');
-        unlinkSync(credFile);
-      } catch {
-        // Ignore deletion errors
-      }
       return { success: false, error: `Mount failed: ${err}` };
+    } finally {
+      // Always clean up credentials - this runs even if mount throws
+      if (credFile) {
+        try {
+          // Overwrite file content before deletion to prevent recovery
+          writeFileSync(credFile, '0'.repeat(256), { mode: 0o400 });
+          unlinkSync(credFile);
+        } catch {
+          // Log but don't fail - credential cleanup is best effort
+        }
+      }
+      if (credDir) {
+        try {
+          rmdirSync(credDir);
+        } catch {
+          // Directory removal is best effort
+        }
+      }
     }
   } else {
     // NFS or CIFS without credentials
@@ -365,6 +382,44 @@ function aptInstall(req: AptInstallRequest): HelperResponse {
   return { success: true, output: `Installed packages: ${packages.join(', ')}` };
 }
 
+function registerService(req: RegisterServiceRequest): HelperResponse {
+  const { serviceName } = req;
+
+  try {
+    // Ensure the services directory exists
+    if (!existsSync(REGISTERED_SERVICES_DIR)) {
+      mkdirSync(REGISTERED_SERVICES_DIR, { recursive: true, mode: 0o755 });
+    }
+
+    // Create registration file with timestamp
+    const registrationFile = `${REGISTERED_SERVICES_DIR}/${serviceName}`;
+    const registrationData = JSON.stringify({
+      serviceName,
+      registeredAt: new Date().toISOString(),
+    });
+    writeFileSync(registrationFile, registrationData, { mode: 0o644 });
+
+    return { success: true, output: `Registered service: ${serviceName}` };
+  } catch (err) {
+    return { success: false, error: `Failed to register service: ${err}` };
+  }
+}
+
+function unregisterService(req: UnregisterServiceRequest): HelperResponse {
+  const { serviceName } = req;
+  const registrationFile = `${REGISTERED_SERVICES_DIR}/${serviceName}`;
+
+  try {
+    if (existsSync(registrationFile)) {
+      const { unlinkSync } = require('fs');
+      unlinkSync(registrationFile);
+    }
+    return { success: true, output: `Unregistered service: ${serviceName}` };
+  } catch (err) {
+    return { success: false, error: `Failed to unregister service: ${err}` };
+  }
+}
+
 export function executeRequest(request: HelperRequest): HelperResponse {
   switch (request.action) {
     case 'create_service_user':
@@ -391,6 +446,10 @@ export function executeRequest(request: HelperRequest): HelperResponse {
       return umount(request);
     case 'apt_install':
       return aptInstall(request);
+    case 'register_service':
+      return registerService(request);
+    case 'unregister_service':
+      return unregisterService(request);
     default:
       return { success: false, error: `Unknown action: ${(request as any).action}` };
   }

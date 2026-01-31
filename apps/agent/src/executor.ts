@@ -1,6 +1,7 @@
 import { spawnSync, spawn, ChildProcess } from 'child_process';
-import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, statSync, unlinkSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync, statSync, unlinkSync, mkdtempSync, rmdirSync } from 'fs';
 import { dirname, resolve, normalize } from 'path';
+import { tmpdir } from 'os';
 import type { CommandPayload, ConfigFile, LogRequestPayload, LogResult, LogStreamPayload, LogStreamLine, MountCommandPayload, MountCheckResult } from '@ownprem/shared';
 import { privilegedClient } from './privilegedClient.js';
 import logger from './lib/logger.js';
@@ -246,6 +247,14 @@ export class Executor {
         if (result.success) {
           executorLogger.info(`Wrote systemd service: ${servicePath}`);
 
+          // Register the service with privileged helper before systemctl operations
+          const registerResult = await privilegedClient.registerService(serviceName);
+          if (!registerResult.success) {
+            executorLogger.warn(`Could not register service: ${registerResult.error}`);
+          } else {
+            executorLogger.info(`Registered service: ${serviceName}`);
+          }
+
           // Reload systemd
           await privilegedClient.systemctl('daemon-reload');
 
@@ -278,6 +287,20 @@ export class Executor {
   }
 
   async uninstall(appName: string): Promise<void> {
+    // Get service name from metadata if available
+    let serviceName = appName;
+    const metadataPath = `${this.appsDir}/${appName}/.ownprem.json`;
+    if (existsSync(metadataPath)) {
+      try {
+        const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8'));
+        if (metadata.serviceName) {
+          serviceName = metadata.serviceName;
+        }
+      } catch {
+        // Ignore metadata parse errors
+      }
+    }
+
     // Stop service first
     await this.systemctl('stop', appName).catch(() => {
       // Ignore errors if service doesn't exist
@@ -287,6 +310,16 @@ export class Executor {
     await this.systemctl('disable', appName).catch(() => {
       // Ignore errors
     });
+
+    // Unregister the service from privileged helper
+    try {
+      const unregisterResult = await privilegedClient.unregisterService(serviceName);
+      if (unregisterResult.success) {
+        executorLogger.info(`Unregistered service: ${serviceName}`);
+      }
+    } catch {
+      // Ignore errors - service may not have been registered
+    }
 
     // Run uninstall script if it exists
     const appDir = `${this.appsDir}/${appName}`;
@@ -886,15 +919,24 @@ export class Executor {
     const args: string[] = ['-t', mountType];
 
     if (mountType === 'cifs' && credentials) {
-      // Write credentials to a temporary file with restricted permissions
-      const credFile = `/tmp/mount-creds-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      let credContent = `username=${credentials.username}\npassword=${credentials.password}\n`;
-      if (credentials.domain) {
-        credContent += `domain=${credentials.domain}\n`;
-      }
+      // Create a secure temporary directory with restricted permissions
+      // Using mkdtempSync ensures unpredictable directory name
+      let credDir: string | null = null;
+      let credFile: string | null = null;
 
       try {
-        writeFileSync(credFile, credContent, { mode: 0o600 });
+        // Create temp directory in /run (tmpfs, not persisted to disk)
+        // Fall back to system temp if /run is not available
+        const tempBase = existsSync('/run') ? '/run' : tmpdir();
+        credDir = mkdtempSync(`${tempBase}/ownprem-mount-`);
+        credFile = `${credDir}/credentials`;
+
+        // Write credentials with strict permissions (owner read only)
+        let credContent = `username=${credentials.username}\npassword=${credentials.password}\n`;
+        if (credentials.domain) {
+          credContent += `domain=${credentials.domain}\n`;
+        }
+        writeFileSync(credFile, credContent, { mode: 0o400 });
 
         const credOptions = `credentials=${credFile}`;
         const allOptions = safeOptions ? `${credOptions},${safeOptions}` : credOptions;
@@ -910,11 +952,23 @@ export class Executor {
           throw new Error(`Mount failed: ${result.stderr || 'Unknown error'}`);
         }
       } finally {
-        // Always delete credentials file
-        try {
-          unlinkSync(credFile);
-        } catch {
-          // Ignore deletion errors
+        // Always clean up credentials - this runs even if mount throws
+        if (credFile) {
+          try {
+            // Overwrite file content before deletion to prevent recovery
+            writeFileSync(credFile, '0'.repeat(256), { mode: 0o400 });
+            unlinkSync(credFile);
+          } catch {
+            // Log but don't fail - credential cleanup is best effort
+            executorLogger.warn('Failed to clean up credential file');
+          }
+        }
+        if (credDir) {
+          try {
+            rmdirSync(credDir);
+          } catch {
+            // Directory removal is best effort
+          }
         }
       }
     } else {

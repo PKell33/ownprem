@@ -5,6 +5,8 @@
  * This is the security boundary - be very careful when modifying.
  */
 
+import { realpathSync, existsSync, lstatSync } from 'fs';
+import { dirname } from 'path';
 import type { HelperRequest } from './types.js';
 
 // Allowed service user names (for create_service_user)
@@ -54,6 +56,47 @@ const ALLOWED_SERVICE_PATTERNS = [
   /^caddy$/,
   /^keepalived$/,
 ];
+
+// System services that don't require registration (core infrastructure)
+const SYSTEM_SERVICES = new Set([
+  'step-ca',
+  'caddy',
+  'keepalived',
+  'ownprem-orchestrator',
+  'ownprem-agent',
+  'ownprem-privileged-helper',
+  'ownprem-ca',
+  'ownprem-caddy',
+]);
+
+// Directory where registered services are tracked
+// Each registered service has a file: /var/lib/ownprem/services/<service-name>
+const REGISTERED_SERVICES_DIR = '/var/lib/ownprem/services';
+
+/**
+ * Check if a service is registered (either a system service or has a registration file).
+ * This prevents arbitrary service control via the ownprem-* pattern.
+ */
+function isServiceRegistered(serviceName: string): boolean {
+  // System services are always allowed
+  if (SYSTEM_SERVICES.has(serviceName)) {
+    return true;
+  }
+
+  // Check for registration file (created by orchestrator during deployment)
+  const registrationFile = `${REGISTERED_SERVICES_DIR}/${serviceName}`;
+  if (existsSync(registrationFile)) {
+    // Verify it's a regular file, not a symlink (prevent symlink attacks)
+    try {
+      const stats = lstatSync(registrationFile);
+      return stats.isFile() && !stats.isSymbolicLink();
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
 
 // Allowed capabilities
 const ALLOWED_CAPABILITIES = [
@@ -142,17 +185,74 @@ export class ValidationError extends Error {
   }
 }
 
-function isPathAllowed(path: string, prefixes: string[]): boolean {
-  // Normalize path to prevent traversal
+/**
+ * Resolve symlinks safely, checking both the path and its parent directories.
+ * Returns the real path if safe, or null if the path escapes allowed prefixes.
+ */
+function resolvePathSafely(path: string, prefixes: string[]): string | null {
+  // Normalize path to prevent basic traversal
   const normalized = path.replace(/\/+/g, '/').replace(/\/$/, '');
 
-  // Block path traversal
-  if (normalized.includes('..') || normalized.includes('\0')) {
-    return false;
+  // Block null bytes and explicit traversal
+  if (normalized.includes('\0') || normalized.includes('..')) {
+    return null;
   }
 
-  // Must start with an allowed prefix
-  return prefixes.some(prefix => normalized.startsWith(prefix));
+  // If path exists, resolve symlinks and verify final destination
+  if (existsSync(normalized)) {
+    try {
+      // Check if path itself is a symlink - reject symlinks pointing outside allowed areas
+      const stats = lstatSync(normalized);
+      if (stats.isSymbolicLink()) {
+        const realPath = realpathSync(normalized);
+        // Verify the resolved path is within allowed prefixes
+        if (!prefixes.some(prefix => realPath.startsWith(prefix))) {
+          return null; // Symlink points outside allowed directories
+        }
+        return realPath;
+      }
+      // For regular files/dirs, still resolve to catch symlinks in parent path
+      const realPath = realpathSync(normalized);
+      if (!prefixes.some(prefix => realPath.startsWith(prefix))) {
+        return null;
+      }
+      return realPath;
+    } catch {
+      return null; // Error resolving path
+    }
+  }
+
+  // Path doesn't exist yet - verify parent directory is safe
+  // This handles the case of creating new files/dirs
+  let parentPath = dirname(normalized);
+  while (parentPath !== '/' && !existsSync(parentPath)) {
+    parentPath = dirname(parentPath);
+  }
+
+  if (parentPath !== '/') {
+    try {
+      const realParent = realpathSync(parentPath);
+      // Verify parent resolves to allowed prefix
+      if (!prefixes.some(prefix =>
+        realParent.startsWith(prefix) || prefix.startsWith(realParent + '/')
+      )) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  // Verify the normalized path starts with allowed prefix
+  if (!prefixes.some(prefix => normalized.startsWith(prefix))) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function isPathAllowed(path: string, prefixes: string[]): boolean {
+  return resolvePathSafely(path, prefixes) !== null;
 }
 
 function isWritePathAllowed(path: string): boolean {
@@ -162,12 +262,65 @@ function isWritePathAllowed(path: string): boolean {
     return false;
   }
 
-  return ALLOWED_WRITE_PATHS.some(rule => {
+  // Check basic prefix/suffix rules first
+  const matchesRule = ALLOWED_WRITE_PATHS.some(rule => {
     if (rule.suffix) {
       return normalized.startsWith(rule.prefix) && normalized.endsWith(rule.suffix);
     }
     return normalized.startsWith(rule.prefix);
   });
+
+  if (!matchesRule) {
+    return false;
+  }
+
+  // Now verify symlinks don't escape allowed areas
+  // Build list of allowed prefixes from ALLOWED_WRITE_PATHS
+  const allowedPrefixes = ALLOWED_WRITE_PATHS.map(r => r.prefix);
+
+  // If path exists, verify it doesn't symlink outside allowed areas
+  if (existsSync(normalized)) {
+    try {
+      const stats = lstatSync(normalized);
+      if (stats.isSymbolicLink()) {
+        const realPath = realpathSync(normalized);
+        // Verify resolved path matches allowed rules
+        const realMatchesRule = ALLOWED_WRITE_PATHS.some(rule => {
+          if (rule.suffix) {
+            return realPath.startsWith(rule.prefix) && realPath.endsWith(rule.suffix);
+          }
+          return realPath.startsWith(rule.prefix);
+        });
+        if (!realMatchesRule) {
+          return false; // Symlink escapes allowed write paths
+        }
+      }
+    } catch {
+      return false;
+    }
+  } else {
+    // Path doesn't exist - verify parent doesn't symlink outside allowed areas
+    let parentPath = dirname(normalized);
+    while (parentPath !== '/' && !existsSync(parentPath)) {
+      parentPath = dirname(parentPath);
+    }
+
+    if (parentPath !== '/' && existsSync(parentPath)) {
+      try {
+        const realParent = realpathSync(parentPath);
+        // Verify parent is within an allowed prefix
+        if (!allowedPrefixes.some(prefix =>
+          realParent.startsWith(prefix) || prefix.startsWith(realParent + '/')
+        )) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 export function validateRequest(request: HelperRequest): void {
@@ -267,8 +420,13 @@ export function validateRequest(request: HelperRequest): void {
         if (!request.service) {
           throw new ValidationError('Service name required');
         }
+        // First check if service name matches allowed patterns
         if (!ALLOWED_SERVICE_PATTERNS.some(p => p.test(request.service!))) {
           throw new ValidationError(`Service not allowed: ${request.service}`);
+        }
+        // Then verify the service is actually registered (prevents arbitrary ownprem-* services)
+        if (!isServiceRegistered(request.service)) {
+          throw new ValidationError(`Service not registered: ${request.service}. Services must be deployed through the orchestrator.`);
         }
       }
       break;
@@ -295,10 +453,22 @@ export function validateRequest(request: HelperRequest): void {
       if (!allowedCommands.some(p => p.test(request.command))) {
         throw new ValidationError(`Command not allowed for user ${request.user}: ${request.command}`);
       }
-      // Validate args don't contain shell metacharacters
+      // Validate args using strict allowlist pattern
+      // Only allow alphanumeric, dots, hyphens, underscores, slashes, colons, equals, commas, and at signs
+      // This covers paths, options (--flag=value), URLs, and common CLI patterns
+      const SAFE_ARG_PATTERN = /^[a-zA-Z0-9._\-/:=,@+]+$/;
       for (const arg of request.args) {
-        if (/[;&|`$(){}]/.test(arg)) {
-          throw new ValidationError(`Dangerous characters in argument: ${arg}`);
+        // Reject null bytes (can cause string truncation)
+        if (arg.includes('\0')) {
+          throw new ValidationError('Null bytes not allowed in arguments');
+        }
+        // Reject newlines (can break argument parsing)
+        if (arg.includes('\n') || arg.includes('\r')) {
+          throw new ValidationError('Newlines not allowed in arguments');
+        }
+        // Use strict allowlist for safe characters
+        if (!SAFE_ARG_PATTERN.test(arg)) {
+          throw new ValidationError(`Invalid characters in argument: ${arg}. Only alphanumeric and ._-/:=,@+ are allowed.`);
         }
       }
       if (request.cwd && !isPathAllowed(request.cwd, ALLOWED_PATH_PREFIXES)) {
@@ -347,16 +517,25 @@ export function validateRequest(request: HelperRequest): void {
         }
       }
 
-      // Validate credentials for CIFS (basic format check)
+      // Validate credentials for CIFS (strict format check)
       if (request.credentials) {
         if (!request.credentials.username || !request.credentials.password) {
           throw new ValidationError('CIFS credentials require username and password');
         }
-        // Prevent injection via credentials
-        if (/[;&|`$(){}]/.test(request.credentials.username) ||
-            /[;&|`$(){}]/.test(request.credentials.domain || '')) {
-          throw new ValidationError('Invalid characters in credentials');
+        // Use strict allowlist for credential fields that go into the credentials file
+        // Username: alphanumeric, underscores, dots, hyphens (typical AD/CIFS usernames)
+        const SAFE_USERNAME_PATTERN = /^[a-zA-Z0-9._\-@]+$/;
+        // Domain: alphanumeric, dots, hyphens (typical domain names)
+        const SAFE_DOMAIN_PATTERN = /^[a-zA-Z0-9.\-]+$/;
+
+        if (!SAFE_USERNAME_PATTERN.test(request.credentials.username)) {
+          throw new ValidationError('Invalid characters in CIFS username. Only alphanumeric and ._-@ are allowed.');
         }
+        if (request.credentials.domain && !SAFE_DOMAIN_PATTERN.test(request.credentials.domain)) {
+          throw new ValidationError('Invalid characters in CIFS domain. Only alphanumeric and .- are allowed.');
+        }
+        // Note: Password can contain any characters since it's written to a secure file
+        // and not passed as a command-line argument
       }
       break;
     }
@@ -383,6 +562,32 @@ export function validateRequest(request: HelperRequest): void {
         if (!ALLOWED_APT_PACKAGES.has(pkg)) {
           throw new ValidationError(`Package not in allowlist: ${pkg}`);
         }
+      }
+      break;
+    }
+
+    case 'register_service': {
+      // Validate service name matches allowed patterns
+      if (!request.serviceName || typeof request.serviceName !== 'string') {
+        throw new ValidationError('serviceName is required');
+      }
+      if (!ALLOWED_SERVICE_PATTERNS.some(p => p.test(request.serviceName))) {
+        throw new ValidationError(`Invalid service name pattern: ${request.serviceName}`);
+      }
+      // Don't allow re-registering system services
+      if (SYSTEM_SERVICES.has(request.serviceName)) {
+        throw new ValidationError(`Cannot register system service: ${request.serviceName}`);
+      }
+      break;
+    }
+
+    case 'unregister_service': {
+      if (!request.serviceName || typeof request.serviceName !== 'string') {
+        throw new ValidationError('serviceName is required');
+      }
+      // Don't allow unregistering system services
+      if (SYSTEM_SERVICES.has(request.serviceName)) {
+        throw new ValidationError(`Cannot unregister system service: ${request.serviceName}`);
       }
       break;
     }

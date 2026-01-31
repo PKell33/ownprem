@@ -144,6 +144,12 @@ export const config = {
     key: process.env.SECRETS_KEY || '',
   },
 
+  tokens: {
+    // HMAC key for agent token hashing - provides protection even if DB is leaked
+    // Uses SECRETS_KEY as base, or generates ephemeral key in development
+    hmacKey: process.env.SECRETS_KEY || (isDevelopment ? randomBytes(32).toString('base64') : ''),
+  },
+
   jwt: {
     secret: getJwtSecret(),
     accessTokenExpiry: '15m',

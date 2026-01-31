@@ -180,6 +180,22 @@ class PrivilegedClient {
   async aptInstall(packages: string[]): Promise<HelperResponse> {
     return this.request('apt_install', { packages });
   }
+
+  /**
+   * Register a service for systemctl operations.
+   * Must be called before systemctl can control the service.
+   */
+  async registerService(serviceName: string): Promise<HelperResponse> {
+    return this.request('register_service', { serviceName });
+  }
+
+  /**
+   * Unregister a service.
+   * Called when uninstalling an app.
+   */
+  async unregisterService(serviceName: string): Promise<HelperResponse> {
+    return this.request('unregister_service', { serviceName });
+  }
 }
 
 export const privilegedClient = new PrivilegedClient();

@@ -17,7 +17,9 @@ export type HelperAction =
   | 'run_as_user'
   | 'mount'
   | 'umount'
-  | 'apt_install';
+  | 'apt_install'
+  | 'register_service'
+  | 'unregister_service';
 
 export interface CreateServiceUserRequest {
   action: 'create_service_user';
@@ -105,6 +107,16 @@ export interface AptInstallRequest {
   packages: string[];
 }
 
+export interface RegisterServiceRequest {
+  action: 'register_service';
+  serviceName: string;
+}
+
+export interface UnregisterServiceRequest {
+  action: 'unregister_service';
+  serviceName: string;
+}
+
 export type HelperRequest =
   | CreateServiceUserRequest
   | CreateDirectoryRequest
@@ -117,7 +129,9 @@ export type HelperRequest =
   | RunAsUserRequest
   | MountRequest
   | UmountRequest
-  | AptInstallRequest;
+  | AptInstallRequest
+  | RegisterServiceRequest
+  | UnregisterServiceRequest;
 
 export interface HelperResponse {
   success: boolean;
