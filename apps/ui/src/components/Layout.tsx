@@ -39,11 +39,12 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen flex">
-      {/* Mobile overlay */}
+      {/* Mobile overlay - backdrop for sidebar */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 md:hidden"
           onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
         />
       )}
 
@@ -114,11 +115,14 @@ export default function Layout() {
         <div className="relative border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
+            aria-expanded={showUserMenu}
+            aria-haspopup="menu"
+            aria-label="User menu"
             className="w-full p-4 flex items-center gap-3 transition-colors
-              hover:bg-gray-200/50 dark:hover:bg-gray-700/50"
+              hover:bg-gray-200/50 dark:hover:bg-gray-700/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
           >
             <div className="w-8 h-8 bg-gray-300 dark:bg-gray-600 rounded-full flex items-center justify-center">
-              <User size={16} className="text-gray-600 dark:text-gray-300" />
+              <User size={16} className="text-gray-600 dark:text-gray-300" aria-hidden="true" />
             </div>
             <div className="flex-1 text-left">
               <p className="text-sm font-medium">{user?.username || 'User'}</p>
@@ -129,27 +133,34 @@ export default function Layout() {
             <ChevronUp
               size={16}
               className={`text-gray-500 dark:text-gray-400 transition-transform ${showUserMenu ? '' : 'rotate-180'}`}
+              aria-hidden="true"
             />
           </button>
 
           {showUserMenu && (
-            <div className="absolute bottom-full left-0 right-0 rounded-t-lg shadow-lg overflow-hidden
-              bg-white border border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+            <div
+              role="menu"
+              aria-label="User options"
+              className="absolute bottom-full left-0 right-0 rounded-t-lg shadow-lg overflow-hidden
+                bg-white border border-gray-200 dark:bg-gray-800 dark:border-gray-700"
+            >
               <NavLink
                 to="/account"
                 onClick={() => setShowUserMenu(false)}
+                role="menuitem"
                 className="w-full px-4 py-3 flex items-center gap-3 transition-colors
                   text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
               >
-                <UserCircle size={16} />
+                <UserCircle size={16} aria-hidden="true" />
                 <span>My Account</span>
               </NavLink>
               <button
                 onClick={handleLogout}
+                role="menuitem"
                 className="w-full px-4 py-3 flex items-center gap-3 transition-colors border-t border-gray-200 dark:border-gray-700
                   text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white"
               >
-                <LogOut size={16} />
+                <LogOut size={16} aria-hidden="true" />
                 <span>Sign Out</span>
               </button>
             </div>

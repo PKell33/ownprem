@@ -219,16 +219,16 @@ export default function HAConfiguration() {
                       <button
                         onClick={() => handlePriorityChange(instance.id, 10)}
                         className="p-0.5 hover:bg-secondary rounded"
-                        title="Increase priority"
+                        aria-label={`Increase priority for ${instance.serverName}`}
                       >
-                        <ChevronUp className="w-3 h-3" />
+                        <ChevronUp className="w-3 h-3" aria-hidden="true" />
                       </button>
                       <button
                         onClick={() => handlePriorityChange(instance.id, -10)}
                         className="p-0.5 hover:bg-secondary rounded"
-                        title="Decrease priority"
+                        aria-label={`Decrease priority for ${instance.serverName}`}
                       >
-                        <ChevronDown className="w-3 h-3" />
+                        <ChevronDown className="w-3 h-3" aria-hidden="true" />
                       </button>
                     </div>
                     {!instance.isPrimary && (
@@ -322,66 +322,80 @@ function ConfigureHAModal({ isOpen, onClose, currentConfig, onSave }: ConfigureH
     <Modal isOpen={isOpen} onClose={onClose} title="Configure High Availability">
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-2 text-red-400">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <div
+            role="alert"
+            aria-live="polite"
+            className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-2 text-red-400"
+          >
+            <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
             <span className="text-sm">{error}</span>
           </div>
         )}
 
         <div>
-          <label className="block text-sm font-medium mb-1">Virtual IP Address *</label>
+          <label htmlFor="ha-vip-address" className="block text-sm font-medium mb-1">Virtual IP Address *</label>
           <input
+            id="ha-vip-address"
             type="text"
             value={vipAddress}
             onChange={e => setVipAddress(e.target.value)}
             className="input w-full"
             placeholder="192.168.1.100"
             required
+            aria-required="true"
+            aria-describedby="ha-vip-address-hint"
           />
-          <p className="text-xs text-muted mt-1">
+          <p id="ha-vip-address-hint" className="text-xs text-muted mt-1">
             Shared IP address that will float between Caddy instances
           </p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Network Interface</label>
+          <label htmlFor="ha-vip-interface" className="block text-sm font-medium mb-1">Network Interface</label>
           <input
+            id="ha-vip-interface"
             type="text"
             value={vipInterface}
             onChange={e => setVipInterface(e.target.value)}
             className="input w-full"
             placeholder="eth0"
+            aria-describedby="ha-vip-interface-hint"
           />
-          <p className="text-xs text-muted mt-1">
+          <p id="ha-vip-interface-hint" className="text-xs text-muted mt-1">
             Network interface for the VIP (e.g., eth0, ens192)
           </p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">VRRP Router ID</label>
+          <label htmlFor="ha-vrrp-router-id" className="block text-sm font-medium mb-1">VRRP Router ID</label>
           <input
+            id="ha-vrrp-router-id"
             type="number"
             value={vrrpRouterId}
             onChange={e => setVrrpRouterId(parseInt(e.target.value) || 51)}
             className="input w-full"
             min={1}
             max={255}
+            aria-describedby="ha-vrrp-router-id-hint"
           />
-          <p className="text-xs text-muted mt-1">
+          <p id="ha-vrrp-router-id-hint" className="text-xs text-muted mt-1">
             Unique identifier for this VRRP group (1-255)
           </p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">VRRP Authentication Password</label>
+          <label htmlFor="ha-vrrp-auth-pass" className="block text-sm font-medium mb-1">VRRP Authentication Password</label>
           <input
+            id="ha-vrrp-auth-pass"
             type="password"
             value={vrrpAuthPass}
             onChange={e => setVrrpAuthPass(e.target.value)}
             className="input w-full"
             placeholder={currentConfig ? '(leave empty to keep current)' : '(optional)'}
+            autoComplete="new-password"
+            aria-describedby="ha-vrrp-auth-pass-hint"
           />
-          <p className="text-xs text-muted mt-1">
+          <p id="ha-vrrp-auth-pass-hint" className="text-xs text-muted mt-1">
             Password for VRRP authentication between instances
           </p>
         </div>

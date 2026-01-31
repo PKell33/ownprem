@@ -74,7 +74,7 @@ export default function EditConfigModal({
         )}
 
         {error && (
-          <div className="p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
+          <div role="alert" aria-live="polite" className="p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
             {error}
           </div>
         )}
@@ -125,16 +125,17 @@ function ConfigFieldInput({
   onChange: (value: unknown) => void;
 }) {
   const id = `field-${field.name}`;
+  const descriptionId = field.description ? `${id}-description` : undefined;
 
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium mb-2">
         {field.label}
-        {field.required && <span className="text-red-400 ml-1">*</span>}
+        {field.required && <span className="text-red-400 ml-1" aria-hidden="true">*</span>}
       </label>
 
       {field.description && (
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">{field.description}</p>
+        <p id={descriptionId} className="text-sm text-gray-500 dark:text-gray-400 mb-2">{field.description}</p>
       )}
 
       {field.type === 'select' && field.options ? (
@@ -143,6 +144,8 @@ function ConfigFieldInput({
           value={String(value || '')}
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+          aria-required={field.required}
+          aria-describedby={descriptionId}
         >
           {field.options.map((opt) => (
             <option key={opt} value={opt}>
@@ -153,10 +156,12 @@ function ConfigFieldInput({
       ) : field.type === 'boolean' ? (
         <label className="flex items-center gap-2 cursor-pointer">
           <input
+            id={id}
             type="checkbox"
             checked={Boolean(value)}
             onChange={(e) => onChange(e.target.checked)}
             className="w-4 h-4 rounded border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-accent focus:ring-accent"
+            aria-describedby={descriptionId}
           />
           <span className="text-gray-600 dark:text-gray-300">Enabled</span>
         </label>
@@ -167,6 +172,8 @@ function ConfigFieldInput({
           value={String(value || '')}
           onChange={(e) => onChange(Number(e.target.value))}
           className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+          aria-required={field.required}
+          aria-describedby={descriptionId}
         />
       ) : field.secret ? (
         <input
@@ -176,6 +183,8 @@ function ConfigFieldInput({
           placeholder="********"
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+          aria-required={field.required}
+          aria-describedby={descriptionId}
         />
       ) : (
         <input
@@ -184,6 +193,8 @@ function ConfigFieldInput({
           value={String(value || '')}
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+          aria-required={field.required}
+          aria-describedby={descriptionId}
         />
       )}
     </div>

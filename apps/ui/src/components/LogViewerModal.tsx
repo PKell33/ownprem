@@ -227,9 +227,9 @@ export default function LogViewerModal({
             onClick={handleDownload}
             disabled={displayLogs.length === 0}
             className="p-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
-            title="Download logs"
+            aria-label="Download logs"
           >
-            <Download size={18} />
+            <Download size={18} aria-hidden="true" />
           </button>
         </div>
 

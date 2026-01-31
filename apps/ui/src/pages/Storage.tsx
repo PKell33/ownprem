@@ -247,24 +247,27 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="block text-sm font-medium mb-2">Name</label>
+        <label htmlFor="add-mount-name" className="block text-sm font-medium mb-2">Name</label>
         <input
+          id="add-mount-name"
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="app-storage"
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
           required
+          aria-required="true"
           pattern="^[a-zA-Z0-9_-]+$"
           title="Only letters, numbers, underscores, and hyphens"
         />
       </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-2">Type</label>
-        <div className="flex gap-4">
+      <fieldset>
+        <legend className="block text-sm font-medium mb-2">Type</legend>
+        <div className="flex gap-4" role="radiogroup" aria-label="Mount type">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
+              id="add-mount-type-nfs"
               type="radio"
               name="mountType"
               value="nfs"
@@ -276,6 +279,7 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
+              id="add-mount-type-cifs"
               type="radio"
               name="mountType"
               value="cifs"
@@ -286,19 +290,22 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
             <span>CIFS (SMB)</span>
           </label>
         </div>
-      </div>
+      </fieldset>
 
       <div>
-        <label className="block text-sm font-medium mb-2">Source</label>
+        <label htmlFor="add-mount-source" className="block text-sm font-medium mb-2">Source</label>
         <input
+          id="add-mount-source"
           type="text"
           value={source}
           onChange={(e) => setSource(e.target.value)}
           placeholder={mountType === 'nfs' ? '192.168.1.10:/volume/data' : '//192.168.1.10/share'}
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
           required
+          aria-required="true"
+          aria-describedby="add-mount-source-hint"
         />
-        <p className="text-xs text-muted mt-1">
+        <p id="add-mount-source-hint" className="text-xs text-muted mt-1">
           {mountType === 'nfs'
             ? 'NFS format: hostname:/path'
             : 'CIFS format: //hostname/share'}
@@ -306,20 +313,23 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-2">Default Options (optional)</label>
+        <label htmlFor="add-mount-options" className="block text-sm font-medium mb-2">Default Options (optional)</label>
         <input
+          id="add-mount-options"
           type="text"
           value={defaultOptions}
           onChange={(e) => setDefaultOptions(e.target.value)}
           placeholder={mountType === 'nfs' ? 'vers=4,rw,noatime' : 'uid=1000,gid=1000'}
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
+          aria-describedby="add-mount-options-hint"
         />
-        <p className="text-xs text-muted mt-1">Comma-separated mount options</p>
+        <p id="add-mount-options-hint" className="text-xs text-muted mt-1">Comma-separated mount options</p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-2">Description (optional)</label>
+        <label htmlFor="add-mount-description" className="block text-sm font-medium mb-2">Description (optional)</label>
         <input
+          id="add-mount-description"
           type="text"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -334,28 +344,33 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
           <h4 className="text-sm font-medium mb-3">CIFS Credentials</h4>
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium mb-1">Username</label>
+              <label htmlFor="add-mount-username" className="block text-sm font-medium mb-1">Username</label>
               <input
+                id="add-mount-username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="smbuser"
+                autoComplete="username"
                 className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Password</label>
+              <label htmlFor="add-mount-password" className="block text-sm font-medium mb-1">Password</label>
               <input
+                id="add-mount-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
+                autoComplete="off"
                 className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Domain (optional)</label>
+              <label htmlFor="add-mount-domain" className="block text-sm font-medium mb-1">Domain (optional)</label>
               <input
+                id="add-mount-domain"
                 type="text"
                 value={domain}
                 onChange={(e) => setDomain(e.target.value)}
@@ -364,7 +379,7 @@ function AddMountForm({ onSubmit, isLoading, onCancel }: AddMountFormProps) {
               />
             </div>
           </div>
-          <p className="text-xs text-muted mt-3">
+          <p id="add-mount-creds-hint" className="text-xs text-muted mt-3">
             Credentials are stored encrypted and never displayed again.
           </p>
         </div>

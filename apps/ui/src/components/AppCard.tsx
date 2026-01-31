@@ -114,10 +114,10 @@ const DeploymentRow = memo(function DeploymentRow({
         {canControl && canOperate && !isRunning && (
           <button
             onClick={handleStart}
-            title="Start"
+            aria-label={`Start ${app.displayName}`}
             className="p-1.5 rounded hover:bg-green-600/20 text-green-500 transition-colors"
           >
-            <Play size={14} />
+            <Play size={14} aria-hidden="true" />
           </button>
         )}
 
@@ -125,10 +125,10 @@ const DeploymentRow = memo(function DeploymentRow({
         {canControl && canOperate && isRunning && !app.mandatory && (
           <button
             onClick={handleStop}
-            title="Stop"
+            aria-label={`Stop ${app.displayName}`}
             className="p-1.5 rounded hover:bg-yellow-600/20 text-yellow-500 transition-colors"
           >
-            <Square size={14} />
+            <Square size={14} aria-hidden="true" />
           </button>
         )}
 
@@ -136,10 +136,10 @@ const DeploymentRow = memo(function DeploymentRow({
         {canControl && canOperate && isRunning && (
           <button
             onClick={handleRestart}
-            title="Restart"
+            aria-label={`Restart ${app.displayName}`}
             className="p-1.5 rounded hover:bg-blue-600/20 text-blue-500 transition-colors"
           >
-            <RotateCw size={14} />
+            <RotateCw size={14} aria-hidden="true" />
           </button>
         )}
 
@@ -150,10 +150,10 @@ const DeploymentRow = memo(function DeploymentRow({
             target="_blank"
             rel="noopener noreferrer"
             onClick={handleWebUI}
-            title="Open Web UI"
+            aria-label={`Open ${app.displayName} web interface`}
             className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
           >
-            <ExternalLink size={14} />
+            <ExternalLink size={14} aria-hidden="true" />
           </a>
         )}
 
@@ -161,10 +161,10 @@ const DeploymentRow = memo(function DeploymentRow({
         {hasServices && canManage && (
           <button
             onClick={handleConnectionInfo}
-            title="Connection Info"
+            aria-label={`View ${app.displayName} connection info`}
             className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
           >
-            <Link size={14} />
+            <Link size={14} aria-hidden="true" />
           </button>
         )}
 
@@ -172,10 +172,10 @@ const DeploymentRow = memo(function DeploymentRow({
         {hasEditableConfig && canManage && (
           <button
             onClick={handleSettings}
-            title="Settings"
+            aria-label={`${app.displayName} settings`}
             className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
           >
-            <Settings size={14} />
+            <Settings size={14} aria-hidden="true" />
           </button>
         )}
 
@@ -183,10 +183,10 @@ const DeploymentRow = memo(function DeploymentRow({
         {canOperate && (
           <button
             onClick={handleLogs}
-            title="View Logs"
+            aria-label={`View ${app.displayName} logs`}
             className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
           >
-            <FileText size={14} />
+            <FileText size={14} aria-hidden="true" />
           </button>
         )}
 
@@ -194,10 +194,10 @@ const DeploymentRow = memo(function DeploymentRow({
         {canControl && canManage && !app.mandatory && (
           <button
             onClick={handleUninstall}
-            title="Uninstall"
+            aria-label={`Uninstall ${app.displayName}`}
             className="p-1.5 rounded hover:bg-red-600/20 text-red-500 transition-colors"
           >
-            <Trash2 size={14} />
+            <Trash2 size={14} aria-hidden="true" />
           </button>
         )}
       </div>
@@ -237,9 +237,11 @@ const AppCard = memo(function AppCard({
   return (
     <div className={`card ${isBlocked ? 'opacity-60' : ''}`}>
       {/* Header - clickable to open modal */}
-      <div
+      <button
+        type="button"
         onClick={onClick}
-        className="p-4 cursor-pointer hover:bg-[var(--bg-secondary)] transition-colors rounded-t-xl"
+        className="w-full text-left p-4 hover:bg-[var(--bg-secondary)] transition-colors rounded-t-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-inset"
+        aria-label={`View ${app.displayName} details`}
       >
         <div className="flex items-start gap-4">
           {/* Icon */}
@@ -255,7 +257,7 @@ const AppCard = memo(function AppCard({
                   <h3 className="font-semibold text-base truncate">{app.displayName}</h3>
                   {app.system && (
                     <span className="flex items-center gap-1 text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">
-                      <Shield size={10} />
+                      <Shield size={10} aria-hidden="true" />
                       System
                     </span>
                   )}
@@ -270,13 +272,13 @@ const AppCard = memo(function AppCard({
             </p>
           </div>
         </div>
-      </div>
+      </button>
 
       {/* Conflict warning */}
       {isBlocked && (
-        <div className="border-t border-[var(--border-color)] px-4 py-2">
+        <div className="border-t border-[var(--border-color)] px-4 py-2" role="alert">
           <div className="flex items-center gap-1 text-xs text-amber-500">
-            <Ban size={12} />
+            <Ban size={12} aria-hidden="true" />
             <span>Conflicts with {conflictsWith}</span>
           </div>
         </div>

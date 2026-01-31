@@ -345,11 +345,12 @@ function TwoFactorAuth() {
                   <button
                     onClick={() => copyToClipboard(setupData.secret)}
                     className="p-2 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                    aria-label="Copy secret key to clipboard"
                   >
                     {copiedCode === setupData.secret ? (
-                      <Check size={16} className="text-green-500" />
+                      <Check size={16} className="text-green-500" aria-hidden="true" />
                     ) : (
-                      <Copy size={16} />
+                      <Copy size={16} aria-hidden="true" />
                     )}
                   </button>
                 </div>
@@ -588,12 +589,12 @@ function SessionManagement() {
                         onClick={() => setConfirmRevokeSession(session.id)}
                         disabled={revoking === session.id}
                         className="p-2 text-muted hover:text-red-500 hover:bg-[var(--bg-tertiary)] rounded transition-colors disabled:opacity-50"
-                        title="End session"
+                        aria-label="End this session"
                       >
                         {revoking === session.id ? (
-                          <Loader2 size={16} className="animate-spin" />
+                          <Loader2 size={16} className="animate-spin" aria-hidden="true" />
                         ) : (
-                          <XCircle size={16} />
+                          <XCircle size={16} aria-hidden="true" />
                         )}
                       </button>
                     )}

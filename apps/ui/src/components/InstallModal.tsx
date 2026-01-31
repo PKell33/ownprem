@@ -96,14 +96,14 @@ export default function InstallModal({ appName, servers, onClose }: InstallModal
       {step === 'select' && (
         <div className="space-y-6">
           {/* Server Selection */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Select Server</label>
+          <fieldset>
+            <legend className="block text-sm font-medium mb-2">Select Server</legend>
             {onlineServers.length === 0 ? (
               <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-red-600 dark:text-red-400">
                 No servers online. Connect a server first.
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2" role="radiogroup" aria-label="Select server">
                 {onlineServers.map((server) => (
                   <label
                     key={server.id}
@@ -123,7 +123,7 @@ export default function InstallModal({ appName, servers, onClose }: InstallModal
                     />
                     <div className={`w-4 h-4 rounded-full border-2 ${
                       selectedServer === server.id ? 'border-accent bg-accent' : 'border-gray-500'
-                    }`} />
+                    }`} aria-hidden="true" />
                     <div>
                       <div className="font-medium">{server.name}</div>
                       <div className="text-sm text-gray-500 dark:text-gray-400">
@@ -134,24 +134,26 @@ export default function InstallModal({ appName, servers, onClose }: InstallModal
                 ))}
               </div>
             )}
-          </div>
+          </fieldset>
 
           {/* Group Selection */}
           {groups.length > 0 && (
             <div>
-              <label className="block text-sm font-medium mb-2">
+              <label htmlFor="install-group" className="block text-sm font-medium mb-2">
                 <span className="flex items-center gap-2">
-                  <Users size={16} />
+                  <Users size={16} aria-hidden="true" />
                   Assign to Group
                 </span>
               </label>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+              <p id="install-group-hint" className="text-sm text-gray-500 dark:text-gray-400 mb-3">
                 Select which group this app belongs to. Only members of this group will be able to manage it.
               </p>
               <select
+                id="install-group"
                 value={selectedGroup}
                 onChange={(e) => setSelectedGroup(e.target.value)}
                 className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+                aria-describedby="install-group-hint"
               >
                 {groups.map((group) => (
                   <option key={group.id} value={group.id}>
@@ -166,7 +168,7 @@ export default function InstallModal({ appName, servers, onClose }: InstallModal
           {/* Dependency Check */}
           {selectedServer && (
             <div>
-              <label className="block text-sm font-medium mb-2">Dependencies</label>
+              <h3 className="block text-sm font-medium mb-2">Dependencies</h3>
               {validating ? (
                 <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
                   <Loader2 size={16} className="animate-spin" />
@@ -312,16 +314,17 @@ function ConfigFieldInput({
   onChange: (value: unknown) => void;
 }) {
   const id = `field-${field.name}`;
+  const descriptionId = field.description ? `${id}-description` : undefined;
 
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium mb-2">
         {field.label}
-        {field.required && <span className="text-red-400 ml-1">*</span>}
+        {field.required && <span className="text-red-400 ml-1" aria-hidden="true">*</span>}
       </label>
 
       {field.description && (
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">{field.description}</p>
+        <p id={descriptionId} className="text-sm text-gray-500 dark:text-gray-400 mb-2">{field.description}</p>
       )}
 
       {field.type === 'select' && field.options ? (
@@ -330,6 +333,8 @@ function ConfigFieldInput({
           value={String(value || '')}
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+          aria-required={field.required}
+          aria-describedby={descriptionId}
         >
           {field.options.map((opt) => (
             <option key={opt} value={opt}>
@@ -340,10 +345,12 @@ function ConfigFieldInput({
       ) : field.type === 'boolean' ? (
         <label className="flex items-center gap-2 cursor-pointer">
           <input
+            id={id}
             type="checkbox"
             checked={Boolean(value)}
             onChange={(e) => onChange(e.target.checked)}
             className="w-4 h-4 rounded border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-accent focus:ring-accent"
+            aria-describedby={descriptionId}
           />
           <span className="text-gray-600 dark:text-gray-300">Enabled</span>
         </label>
@@ -354,6 +361,8 @@ function ConfigFieldInput({
           value={String(value || '')}
           onChange={(e) => onChange(Number(e.target.value))}
           className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+          aria-required={field.required}
+          aria-describedby={descriptionId}
         />
       ) : (
         <input
@@ -362,6 +371,8 @@ function ConfigFieldInput({
           value={String(value || '')}
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded focus:outline-none focus:border-accent"
+          aria-required={field.required}
+          aria-describedby={descriptionId}
         />
       )}
     </div>

@@ -293,12 +293,12 @@ function ConnectionField({ icon, label, value, copyKey, copied, onCopy }: Connec
       <button
         onClick={() => onCopy(value, copyKey)}
         className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-        title="Copy to clipboard"
+        aria-label={`Copy ${label} to clipboard`}
       >
         {copied === copyKey ? (
-          <Check size={14} className="text-green-400" />
+          <Check size={14} className="text-green-400" aria-hidden="true" />
         ) : (
-          <Copy size={14} className="text-gray-400" />
+          <Copy size={14} className="text-gray-400" aria-hidden="true" />
         )}
       </button>
     </div>
@@ -328,23 +328,24 @@ function CredentialField({ label, value, isVisible, onToggle, copyKey, copied, o
         <button
           onClick={onToggle}
           className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-          title={isVisible ? 'Hide' : 'Show'}
+          aria-label={isVisible ? `Hide ${label}` : `Show ${label}`}
+          aria-pressed={isVisible}
         >
           {isVisible ? (
-            <EyeOff size={14} className="text-gray-400" />
+            <EyeOff size={14} className="text-gray-400" aria-hidden="true" />
           ) : (
-            <Eye size={14} className="text-gray-400" />
+            <Eye size={14} className="text-gray-400" aria-hidden="true" />
           )}
         </button>
         <button
           onClick={() => onCopy(value, copyKey)}
           className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-          title="Copy to clipboard"
+          aria-label={`Copy ${label} to clipboard`}
         >
           {copied === copyKey ? (
-            <Check size={14} className="text-green-400" />
+            <Check size={14} className="text-green-400" aria-hidden="true" />
           ) : (
-            <Copy size={14} className="text-gray-400" />
+            <Copy size={14} className="text-gray-400" aria-hidden="true" />
           )}
         </button>
       </div>
@@ -373,8 +374,9 @@ function QRCodeDisplay({ value, label }: QRCodeDisplayProps) {
       <button
         onClick={copyUrl}
         className="mt-2 flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+        aria-label="Copy connection URL to clipboard"
       >
-        {copied ? <Check size={12} /> : <Copy size={12} />}
+        {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
         {copied ? 'Copied!' : 'Copy URL'}
       </button>
       <p className="mt-1 text-xs text-gray-400 font-mono break-all max-w-[200px] text-center">

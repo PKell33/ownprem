@@ -398,22 +398,28 @@ function AddServerForm({ onSubmit }: { onSubmit: (name: string, host: string) =>
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="block text-sm font-medium mb-2">Server Name</label>
+        <label htmlFor="add-server-name" className="block text-sm font-medium mb-2">Server Name</label>
         <input
+          id="add-server-name"
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="server-1"
+          required
+          aria-required="true"
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium mb-2">Host / IP Address</label>
+        <label htmlFor="add-server-host" className="block text-sm font-medium mb-2">Host / IP Address</label>
         <input
+          id="add-server-host"
           type="text"
           value={host}
           onChange={(e) => setHost(e.target.value)}
           placeholder="192.168.1.100"
+          required
+          aria-required="true"
           className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
         />
       </div>

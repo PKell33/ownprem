@@ -134,9 +134,14 @@ export default function MountCard({
                       setShowMenu(false);
                       setConfirmDelete(false);
                     }}
+                    aria-hidden="true"
                   />
-                  <div className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg shadow-lg min-w-[180px]
-                    bg-[var(--bg-secondary)] border border-[var(--border-color)]">
+                  <div
+                    role="menu"
+                    aria-label="Mount actions"
+                    className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg shadow-lg min-w-[180px]
+                      bg-[var(--bg-secondary)] border border-[var(--border-color)]"
+                  >
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -144,21 +149,23 @@ export default function MountCard({
                         setShowAssignModal(true);
                       }}
                       disabled={availableServers.length === 0}
+                      role="menuitem"
                       className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
                         text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Server size={14} />
+                      <Server size={14} aria-hidden="true" />
                       Assign to Server
                     </button>
-                    <div className="my-1 border-t border-[var(--border-color)]" />
+                    <div className="my-1 border-t border-[var(--border-color)]" role="separator" />
                     <button
                       onClick={handleDelete}
                       disabled={hasActiveMounts}
+                      role="menuitem"
                       className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
                         ${hasActiveMounts ? 'text-gray-500 cursor-not-allowed' : 'text-red-500 hover:bg-red-500/10'}`}
-                      title={hasActiveMounts ? 'Unmount all servers first' : undefined}
+                      aria-label={hasActiveMounts ? 'Delete mount (disabled: unmount all servers first)' : (confirmDelete ? 'Confirm delete mount' : 'Delete mount')}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={14} aria-hidden="true" />
                       {confirmDelete ? 'Confirm Delete' : 'Delete Mount'}
                     </button>
                   </div>
@@ -226,12 +233,14 @@ export default function MountCard({
         >
           <form onSubmit={handleAssignSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Server</label>
+              <label htmlFor="assign-server" className="block text-sm font-medium mb-2">Server</label>
               <select
+                id="assign-server"
                 value={assignServerId}
                 onChange={(e) => setAssignServerId(e.target.value)}
                 className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
                 required
+                aria-required="true"
               >
                 <option value="">Select a server...</option>
                 {availableServers.map((server) => (
@@ -243,42 +252,49 @@ export default function MountCard({
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Mount Point</label>
+              <label htmlFor="assign-mount-point" className="block text-sm font-medium mb-2">Mount Point</label>
               <input
+                id="assign-mount-point"
                 type="text"
                 value={assignMountPoint}
                 onChange={(e) => setAssignMountPoint(e.target.value)}
                 placeholder="/mnt/app-data"
                 className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
                 required
+                aria-required="true"
+                aria-describedby="assign-mount-point-hint"
                 pattern="^/[a-zA-Z0-9/_-]+$"
                 title="Must be an absolute path with alphanumeric characters, underscores, and hyphens"
               />
-              <p className="text-xs text-muted mt-1">Absolute path where the storage will be mounted</p>
+              <p id="assign-mount-point-hint" className="text-xs text-muted mt-1">Absolute path where the storage will be mounted</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Mount Options (optional)</label>
+              <label htmlFor="assign-options" className="block text-sm font-medium mb-2">Mount Options (optional)</label>
               <input
+                id="assign-options"
                 type="text"
                 value={assignOptions}
                 onChange={(e) => setAssignOptions(e.target.value)}
                 placeholder="vers=4,rw,noatime"
                 className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
+                aria-describedby="assign-options-hint"
               />
-              <p className="text-xs text-muted mt-1">Override default mount options for this server</p>
+              <p id="assign-options-hint" className="text-xs text-muted mt-1">Override default mount options for this server</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Purpose (optional)</label>
+              <label htmlFor="assign-purpose" className="block text-sm font-medium mb-2">Purpose (optional)</label>
               <input
+                id="assign-purpose"
                 type="text"
                 value={assignPurpose}
                 onChange={(e) => setAssignPurpose(e.target.value)}
                 placeholder="app-data"
                 className="w-full px-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded focus:outline-none focus:border-accent"
+                aria-describedby="assign-purpose-hint"
               />
-              <p className="text-xs text-muted mt-1">For future app linking (e.g., postgres-data, redis-data)</p>
+              <p id="assign-purpose-hint" className="text-xs text-muted mt-1">For future app linking (e.g., postgres-data, redis-data)</p>
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -360,10 +376,10 @@ function ServerMountItem({
             <button
               onClick={onMount}
               disabled={isLoading}
-              title="Mount"
+              aria-label={`Mount storage on ${serverMount.serverName}`}
               className="p-1.5 rounded hover:bg-green-600/20 text-green-500 transition-colors disabled:opacity-50"
             >
-              <Play size={14} />
+              <Play size={14} aria-hidden="true" />
             </button>
           )}
 
@@ -372,10 +388,10 @@ function ServerMountItem({
             <button
               onClick={() => setConfirmAction('unmount')}
               disabled={isLoading}
-              title="Unmount"
+              aria-label={`Unmount storage from ${serverMount.serverName}`}
               className="p-1.5 rounded hover:bg-yellow-600/20 text-yellow-500 transition-colors disabled:opacity-50"
             >
-              <Square size={14} />
+              <Square size={14} aria-hidden="true" />
             </button>
           )}
 
@@ -384,10 +400,10 @@ function ServerMountItem({
             <button
               onClick={() => setConfirmAction('delete')}
               disabled={isLoading}
-              title="Remove assignment"
+              aria-label={`Remove mount assignment from ${serverMount.serverName}`}
               className="p-1.5 rounded hover:bg-red-600/20 text-red-500 transition-colors disabled:opacity-50"
             >
-              <Trash2 size={14} />
+              <Trash2 size={14} aria-hidden="true" />
             </button>
           )}
         </div>

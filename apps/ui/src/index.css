@@ -2,6 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Global focus styles for keyboard navigation */
+@layer base {
+  /* Remove default focus outline, use focus-visible for keyboard users only */
+  *:focus {
+    outline: none;
+  }
+
+  /* Focus-visible ring for interactive elements */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  [role="option"]:focus-visible,
+  [role="menuitem"]:focus-visible,
+  [tabindex="0"]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent);
+    border-radius: 0.25rem;
+  }
+
+  /* Input focus styles */
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent);
+  }
+
+  /* Skip link for keyboard users */
+  .skip-link {
+    position: absolute;
+    top: -100%;
+    left: 0;
+    padding: 0.5rem 1rem;
+    background: var(--color-accent);
+    color: var(--tokyo-bg);
+    z-index: 100;
+    transition: top 0.2s;
+  }
+
+  .skip-link:focus {
+    top: 0;
+  }
+}
+
 :root {
   --color-accent: #7aa2f7;
   --color-accent-light: #3d59a1;
