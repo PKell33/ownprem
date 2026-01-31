@@ -292,7 +292,10 @@ function validateEnvConfig(): void {
   }
 
   // In production, AUTH_TOKEN is required for secure agent-orchestrator communication
-  if (!isDev && !process.env.AUTH_TOKEN) {
+  // Exception: core server connecting via localhost doesn't need a token
+  const isCore = process.env.SERVER_ID === 'core';
+  const isLocalhost = orchestratorUrl && (orchestratorUrl.includes('localhost') || orchestratorUrl.includes('127.0.0.1'));
+  if (!isDev && !process.env.AUTH_TOKEN && !(isCore && isLocalhost)) {
     errors.push('AUTH_TOKEN is required in production for secure agent authentication');
   }
 
