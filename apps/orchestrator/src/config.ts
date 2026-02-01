@@ -193,6 +193,7 @@ export const config = {
     appDefinitions: process.env.APP_DEFINITIONS_PATH || join(__dirname, '../../../app-definitions'),
     logs: process.env.LOGS_PATH || join(__dirname, '../../../logs'),
     backups: process.env.BACKUP_PATH || join(__dirname, '../../../data/backups'),
+    icons: process.env.ICONS_PATH || join(__dirname, '../../../data/icons'),
     caddyConfig: process.env.CADDY_CONFIG_PATH || '/etc/caddy/Caddyfile',
   },
 

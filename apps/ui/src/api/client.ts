@@ -316,8 +316,75 @@ export const api = {
     );
   },
 
-  // TODO: Umbrel App Store integration will be added here
-  // Apps and deployments will use Docker containers from Umbrel ecosystem
+  // Apps (Umbrel App Store)
+  async getApps(category?: string) {
+    const query = category ? `?category=${encodeURIComponent(category)}` : '';
+    return fetchWithAuth<AppsResponse>(`${API_BASE}/apps${query}`);
+  },
+
+  async getApp(id: string) {
+    return fetchWithAuth<UmbrelApp>(`${API_BASE}/apps/${encodeURIComponent(id)}`);
+  },
+
+  async getAppCategories() {
+    return fetchWithAuth<AppCategoriesResponse>(`${API_BASE}/apps/categories`);
+  },
+
+  async syncApps() {
+    return fetchWithAuth<AppSyncResponse>(`${API_BASE}/apps/sync`, {
+      method: 'POST',
+    });
+  },
+
+  async getAppSyncStatus() {
+    return fetchWithAuth<AppSyncStatus>(`${API_BASE}/apps/status`);
+  },
+
+  // Deployments
+  async getDeployments(serverId?: string) {
+    const query = serverId ? `?serverId=${encodeURIComponent(serverId)}` : '';
+    return fetchWithAuth<DeploymentsResponse>(`${API_BASE}/deployments${query}`);
+  },
+
+  async getDeployment(id: string) {
+    return fetchWithAuth<DeploymentInfo>(`${API_BASE}/deployments/${encodeURIComponent(id)}`);
+  },
+
+  async deployApp(serverId: string, appId: string, config?: Record<string, unknown>) {
+    return fetchWithAuth<DeploymentInfo>(`${API_BASE}/deployments`, {
+      method: 'POST',
+      body: JSON.stringify({ serverId, appId, config }),
+    });
+  },
+
+  async startDeployment(id: string) {
+    return fetchWithAuth<DeploymentInfo>(`${API_BASE}/deployments/${encodeURIComponent(id)}/start`, {
+      method: 'POST',
+    });
+  },
+
+  async stopDeployment(id: string) {
+    return fetchWithAuth<DeploymentInfo>(`${API_BASE}/deployments/${encodeURIComponent(id)}/stop`, {
+      method: 'POST',
+    });
+  },
+
+  async restartDeployment(id: string) {
+    return fetchWithAuth<DeploymentInfo>(`${API_BASE}/deployments/${encodeURIComponent(id)}/restart`, {
+      method: 'POST',
+    });
+  },
+
+  async uninstallDeployment(id: string) {
+    return fetchWithAuth<void>(`${API_BASE}/deployments/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getDeploymentLogs(id: string, lines?: number) {
+    const query = lines ? `?lines=${lines}` : '';
+    return fetchWithAuth<DeploymentLogsResponse>(`${API_BASE}/deployments/${encodeURIComponent(id)}/logs${query}`);
+  },
 
   // System
   async getSystemStatus() {
@@ -613,6 +680,98 @@ export interface AssignMountData {
   options?: string;
   purpose?: string;
   autoMount?: boolean;
+}
+
+// Umbrel App Store types
+export interface UmbrelApp {
+  id: string;
+  name: string;
+  version: string;
+  tagline: string;
+  description: string;
+  category: string;
+  developer: string;
+  website: string;
+  repo: string;
+  port: number;
+  dependencies: string[];
+  icon: string;
+  gallery: string[];
+  composeFile: string;
+  manifest: UmbrelAppManifest;
+}
+
+export interface UmbrelAppManifest {
+  manifestVersion: number;
+  id: string;
+  category: string;
+  name: string;
+  version: string;
+  tagline: string;
+  description: string;
+  developer: string;
+  website: string;
+  dependencies: string[];
+  repo: string;
+  support: string;
+  port: number;
+  gallery: string[];
+  path: string;
+  defaultUsername?: string;
+  defaultPassword?: string;
+  releaseNotes?: string;
+  submitter?: string;
+  submission?: string;
+}
+
+export interface AppsResponse {
+  apps: UmbrelApp[];
+  count: number;
+}
+
+export interface AppSyncResponse {
+  synced: number;
+  updated: number;
+  removed: number;
+  errors: string[];
+  message: string;
+}
+
+export interface AppSyncStatus {
+  needsSync: boolean;
+  appCount: number;
+}
+
+export interface AppCategory {
+  category: string;
+  count: number;
+}
+
+export interface AppCategoriesResponse {
+  categories: AppCategory[];
+}
+
+// Deployment types
+export interface DeploymentInfo {
+  id: string;
+  serverId: string;
+  appId: string;
+  appName: string;
+  version: string;
+  status: 'pending' | 'installing' | 'running' | 'stopped' | 'error';
+  statusMessage?: string;
+  installedAt: string;
+  updatedAt: string;
+}
+
+export interface DeploymentsResponse {
+  deployments: DeploymentInfo[];
+  count: number;
+}
+
+export interface DeploymentLogsResponse {
+  logs: string;
+  lines: number;
 }
 
 /**

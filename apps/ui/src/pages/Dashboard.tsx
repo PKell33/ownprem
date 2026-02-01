@@ -6,7 +6,7 @@ import { useMetricsStore } from '../stores/useMetricsStore';
 import { ComponentErrorBoundary } from '../components/ComponentErrorBoundary';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { QueryError } from '../components/QueryError';
-import { Sparkline } from '../components/MetricsChart';
+import { ServerCard } from '../components/ServerCard';
 
 export default function Dashboard() {
   const { data: servers, isLoading: serversLoading, error: serversError, refetch: refetchServers } = useServers();
@@ -86,48 +86,7 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 xl:grid-cols-2 min-[1800px]:grid-cols-3 gap-4">
             {servers?.slice(0, 6).map((server) => (
               <ComponentErrorBoundary key={server.id} componentName={`Server: ${server.name}`}>
-                <div className="card p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <Server size={18} className="text-accent" />
-                      <span className="font-medium">{server.name}</span>
-                    </div>
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      server.agentStatus === 'online'
-                        ? 'bg-green-500/20 text-green-400'
-                        : 'bg-red-500/20 text-red-400'
-                    }`}>
-                      {server.agentStatus}
-                    </span>
-                  </div>
-
-                  {server.agentStatus === 'online' && server.metrics && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-muted">CPU</span>
-                          <span className="text-xs font-medium">{server.metrics.cpuPercent?.toFixed(0)}%</span>
-                        </div>
-                        <Sparkline serverId={server.id} metric="cpu" height={24} width={90} />
-                      </div>
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-muted">Memory</span>
-                          <span className="text-xs font-medium">
-                            {server.metrics.memoryTotal > 0
-                              ? ((server.metrics.memoryUsed / server.metrics.memoryTotal) * 100).toFixed(0)
-                              : 0}%
-                          </span>
-                        </div>
-                        <Sparkline serverId={server.id} metric="memory" height={24} width={90} />
-                      </div>
-                    </div>
-                  )}
-
-                  {server.agentStatus !== 'online' && (
-                    <p className="text-sm text-muted">Agent offline</p>
-                  )}
-                </div>
+                <ServerCard server={server} />
               </ComponentErrorBoundary>
             ))}
           </div>

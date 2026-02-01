@@ -90,6 +90,20 @@ export const Sparkline = memo(function Sparkline({
   // Calculate SVG path (only if we have data)
   const points = useMemo(() => {
     if (data.length < 2) return [];
+
+    // For memory/disk with total, use raw values; otherwise use percentage
+    if (total && metric !== 'cpu') {
+      const max = total;
+      const min = 0;
+      const range = max - min || 1;
+      return data.map((d, i) => {
+        const x = leftPadding + (i / (data.length - 1)) * chartWidth;
+        const y = height - ((d.raw - min) / range) * height;
+        return { x, y, percent: d.percent, raw: d.raw };
+      });
+    }
+
+    // CPU or no total: use percentage scale
     const max = 100;
     const min = 0;
     const range = max - min || 1;
@@ -98,7 +112,7 @@ export const Sparkline = memo(function Sparkline({
       const y = height - ((d.percent - min) / range) * height;
       return { x, y, percent: d.percent, raw: d.raw };
     });
-  }, [data, leftPadding, chartWidth, height]);
+  }, [data, leftPadding, chartWidth, height, total, metric]);
 
   const pathD = useMemo(() => {
     if (points.length < 2) return '';
