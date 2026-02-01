@@ -1,5 +1,6 @@
+import { useRef, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, LogIn } from 'lucide-react';
 import { NodeNetwork } from '../../../components/NodeNetwork';
 import { authStyles } from '../types';
 
@@ -7,34 +8,121 @@ interface AuthCardProps {
   children: React.ReactNode;
   tagline: string;
   error?: string | null;
+  showCard: boolean;
+  onShowCard: () => void;
 }
 
 /**
- * Shared authentication card wrapper with animated background.
+ * Login screen with animated background.
+ * Starts in splash mode with logo + login button, then reveals the card.
  */
-export default function AuthCard({ children, tagline, error }: AuthCardProps) {
+export default function AuthCard({ children, tagline, error, showCard, onShowCard }: AuthCardProps) {
+  const oRef = useRef<HTMLSpanElement>(null);
+  const [origin, setOrigin] = useState<{ x: number; y: number } | undefined>();
+  const [showButton, setShowButton] = useState(false);
+
+  // Get the position of the "O" character for node origin
+  useEffect(() => {
+    const updateOrigin = () => {
+      if (oRef.current) {
+        const rect = oRef.current.getBoundingClientRect();
+        setOrigin({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        });
+      }
+    };
+
+    const timeout = setTimeout(updateOrigin, 50);
+    window.addEventListener('resize', updateOrigin);
+
+    return () => {
+      clearTimeout(timeout);
+      window.removeEventListener('resize', updateOrigin);
+    };
+  }, []);
+
+  // Show login button after nodes have dispersed
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setShowButton(true);
+    }, 1500);
+
+    return () => clearTimeout(timeout);
+  }, []);
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
       {/* Animated node network background */}
-      <NodeNetwork />
+      {origin ? (
+        <NodeNetwork origin={origin} expansionSpeed={0.15} />
+      ) : (
+        <div className="fixed inset-0" style={{ backgroundColor: '#0a0a0f' }} />
+      )}
+
+      {/* Splash mode: Logo + Login button */}
+      {!showCard && (
+        <>
+          {/* Large centered logo */}
+          <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-10">
+            <div
+              className="text-8xl md:text-9xl font-bold tracking-tight"
+              style={{
+                color: '#c0caf5',
+                textShadow: '0 0 30px rgba(122, 162, 247, 0.5), 0 0 60px rgba(122, 162, 247, 0.3)',
+              }}
+            >
+              <span ref={oRef} style={{ fontFamily: 'system-ui' }}>&#x232C;</span>
+              <span style={{ color: '#7aa2f7' }}>w</span>
+              <span>nPrem</span>
+            </div>
+          </div>
+
+          {/* Login button */}
+          <div
+            className={`fixed inset-0 flex items-center justify-center pointer-events-none z-10 transition-opacity duration-700 ${showButton ? 'opacity-100' : 'opacity-0'}`}
+            style={{ paddingTop: '200px' }}
+          >
+            <button
+              onClick={onShowCard}
+              disabled={!showButton}
+              className="pointer-events-auto flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-300 hover:scale-105"
+              style={{
+                backgroundColor: 'rgba(122, 162, 247, 0.15)',
+                border: '1px solid rgba(122, 162, 247, 0.3)',
+                color: '#c0caf5',
+              }}
+            >
+              <LogIn size={20} />
+              <span>Login</span>
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Login card */}
-      <div style={authStyles.card} className="relative z-10">
+      <div
+        className={`relative z-10 transition-all duration-500 ${showCard ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}
+        style={authStyles.card}
+      >
         {/* Logo */}
-        <div className="text-center mb-2">
-          <h1 className="text-4xl font-bold tracking-tight" style={{ color: '#c0caf5' }}>
+        <h1 className="text-center mb-2">
+          <span
+            className="text-4xl font-bold tracking-tight"
+            style={{ color: '#c0caf5' }}
+          >
             <span style={{ fontFamily: 'system-ui' }}>&#x232C;</span>
             <span style={{ color: '#7aa2f7' }}>w</span>
             <span>nPrem</span>
-          </h1>
-        </div>
+          </span>
+        </h1>
 
         {/* Tagline */}
         <p className="text-center mb-8" style={{ color: '#565f89', fontSize: '14px' }}>
           {tagline}
         </p>
 
-        {/* Error display - form-level errors announced by screen readers */}
+        {/* Error display */}
         {error && (
           <div
             role="alert"

@@ -1,18 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '../../../test/utils';
+import { render, screen, waitFor, act } from '../../../test/utils';
 import userEvent from '@testing-library/user-event';
 import { Login } from '../index';
 
 // Mock the API
 const mockLogin = vi.fn();
-const mockLoginWithTotp = vi.fn();
 const mockSetup = vi.fn();
+const mockCheckSetup = vi.fn();
 
 vi.mock('../../../api/client', () => ({
   api: {
     login: (...args: unknown[]) => mockLogin(...args),
-    loginWithTotp: (...args: unknown[]) => mockLoginWithTotp(...args),
     setup: (...args: unknown[]) => mockSetup(...args),
+    checkSetup: () => mockCheckSetup(),
   },
 }));
 
@@ -21,7 +21,6 @@ const mockSetAuthenticated = vi.fn();
 const mockSetError = vi.fn();
 const mockSetLoading = vi.fn();
 const mockClearError = vi.fn();
-const mockSetTotpSetupRequired = vi.fn();
 
 vi.mock('../../../stores/useAuthStore', () => ({
   useAuthStore: () => ({
@@ -31,7 +30,6 @@ vi.mock('../../../stores/useAuthStore', () => ({
     setError: mockSetError,
     setLoading: mockSetLoading,
     clearError: mockClearError,
-    setTotpSetupRequired: mockSetTotpSetupRequired,
   }),
 }));
 
@@ -49,27 +47,52 @@ vi.mock('react-router-dom', async () => {
 describe('Login Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockCheckSetup.mockResolvedValue({ needsSetup: false });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
-  it('renders login form by default', () => {
+  // Helper to show the login card from splash mode
+  async function showLoginCard(user: ReturnType<typeof userEvent.setup>) {
+    // Wait for checkSetup to complete and timers to advance
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100); // Let checkSetup resolve
+    });
+
+    // Wait for splash login button to appear (1500ms delay)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+
+    // Click the splash login button to show the card (exact match to avoid "Back to login")
+    const splashLoginButton = screen.getByRole('button', { name: 'Login' });
+    await user.click(splashLoginButton);
+  }
+
+  it('renders login form after clicking splash login button', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Login />);
+
+    await showLoginCard(user);
 
     expect(screen.getByText('Orchestrate Everything')).toBeInTheDocument();
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
   });
 
   it('shows validation errors for empty fields on blur', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<Login />);
 
+    await showLoginCard(user);
+
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText('Password');
 
     // Focus and blur username to trigger validation
     await user.click(usernameInput);
@@ -87,15 +110,17 @@ describe('Login Page', () => {
   });
 
   it('submits form and calls API with credentials', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     mockLogin.mockResolvedValueOnce({
       user: { id: '1', username: 'testuser' },
     });
 
     render(<Login />);
 
+    await showLoginCard(user);
+
     await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -104,15 +129,17 @@ describe('Login Page', () => {
   });
 
   it('navigates to home on successful login', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     mockLogin.mockResolvedValueOnce({
       user: { id: '1', username: 'testuser' },
     });
 
     render(<Login />);
 
+    await showLoginCard(user);
+
     await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -121,32 +148,16 @@ describe('Login Page', () => {
     });
   });
 
-  it('transitions to TOTP view when 2FA required', async () => {
-    const user = userEvent.setup();
-    mockLogin.mockResolvedValueOnce({
-      totpRequired: true,
-    });
-
-    render(<Login />);
-
-    await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Enter verification code')).toBeInTheDocument();
-      expect(screen.getByLabelText(/verification code/i)).toBeInTheDocument();
-    });
-  });
-
   it('transitions to setup view when no users exist', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     mockLogin.mockRejectedValueOnce(new Error('No users exist'));
 
     render(<Login />);
 
+    await showLoginCard(user);
+
     await user.type(screen.getByLabelText(/username/i), 'admin');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -156,16 +167,15 @@ describe('Login Page', () => {
   });
 
   it('shows API error messages', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     mockLogin.mockRejectedValueOnce(new Error('Invalid credentials'));
-
-    // Need to update the mock to return the error
-    vi.mocked(mockSetError).mockImplementation(() => {});
 
     render(<Login />);
 
+    await showLoginCard(user);
+
     await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'wrongpassword');
+    await user.type(screen.getByLabelText('Password'), 'wrongpassword');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -173,21 +183,21 @@ describe('Login Page', () => {
     });
   });
 
-  it('TOTP form shows back button to return to login', async () => {
-    const user = userEvent.setup();
-    mockLogin.mockResolvedValueOnce({
-      totpRequired: true,
-    });
+  it('setup form shows back button to return to login', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockLogin.mockRejectedValueOnce(new Error('No users exist'));
 
     render(<Login />);
 
-    // Login first
-    await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await showLoginCard(user);
+
+    // Trigger setup view
+    await user.type(screen.getByLabelText(/username/i), 'admin');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(screen.getByText('Enter verification code')).toBeInTheDocument();
+      expect(screen.getByText('Create Admin Account')).toBeInTheDocument();
     });
 
     // Click back button
@@ -197,22 +207,17 @@ describe('Login Page', () => {
     expect(screen.getByText('Orchestrate Everything')).toBeInTheDocument();
   });
 
-  it('redirects to 2FA setup when totpSetupRequired', async () => {
-    const user = userEvent.setup();
-    mockLogin.mockResolvedValueOnce({
-      user: { id: '1', username: 'admin' },
-      totpSetupRequired: true,
-    });
+  it('automatically shows setup form when checkSetup returns needsSetup: true', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockCheckSetup.mockResolvedValue({ needsSetup: true });
 
     render(<Login />);
 
-    await user.type(screen.getByLabelText(/username/i), 'admin');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await showLoginCard(user);
 
+    // Should automatically be in setup view
     await waitFor(() => {
-      expect(mockSetTotpSetupRequired).toHaveBeenCalledWith(true);
-      expect(mockNavigate).toHaveBeenCalledWith('/setup-2fa', { replace: true });
+      expect(screen.getByText('Create Admin Account')).toBeInTheDocument();
     });
   });
 });

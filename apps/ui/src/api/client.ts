@@ -232,16 +232,6 @@ export const api = {
     return handleResponse<LoginResponse>(res);
   },
 
-  async loginWithTotp(username: string, password: string, totpCode: string) {
-    const res = await fetch(`${API_BASE}/auth/login/totp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include', // Receive httpOnly cookies
-      body: JSON.stringify({ username, password, totpCode }),
-    });
-    return handleResponse<AuthResponse>(res);
-  },
-
   async logout() {
     // Logout call sends cookies automatically - server will clear them
     await fetch(`${API_BASE}/auth/logout`, {
@@ -262,6 +252,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ oldPassword, newPassword }),
     });
+  },
+
+  async checkSetup() {
+    const res = await fetch(`${API_BASE}/auth/setup`, {
+      credentials: 'include',
+    });
+    return handleResponse<{ needsSetup: boolean }>(res);
   },
 
   async setup(username: string, password: string) {
@@ -395,84 +392,9 @@ export const api = {
     return fetchWithAuth<LogsResponse>(`${API_BASE}/deployments/${deploymentId}/logs${query}`);
   },
 
-  // Services
-  async getServices() {
-    return fetchWithAuth<Service[]>(`${API_BASE}/services`);
-  },
-
   // System
   async getSystemStatus() {
     return fetchWithAuth<SystemStatus>(`${API_BASE}/system/status`);
-  },
-
-  // Audit logs
-  async getAuditLogs(options?: { limit?: number; offset?: number; action?: string }) {
-    const params = new URLSearchParams();
-    if (options?.limit) params.set('limit', options.limit.toString());
-    if (options?.offset) params.set('offset', options.offset.toString());
-    if (options?.action) params.set('action', options.action);
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return fetchWithAuth<AuditLogsResponse>(`${API_BASE}/audit-logs${query}`);
-  },
-
-  async getAuditLogActions() {
-    return fetchWithAuth<string[]>(`${API_BASE}/audit-logs/actions`);
-  },
-
-  // Sessions
-  async getSessions() {
-    return fetchWithAuth<SessionInfo[]>(`${API_BASE}/auth/sessions`);
-  },
-
-  async getSessionsWithCurrent() {
-    // Refresh token is sent via httpOnly cookie automatically
-    return fetchWithAuth<SessionInfo[]>(`${API_BASE}/auth/sessions/current`, {
-      method: 'POST',
-    });
-  },
-
-  async revokeSession(sessionId: string) {
-    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/auth/sessions/${sessionId}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async revokeOtherSessions() {
-    // Refresh token is sent via httpOnly cookie automatically
-    return fetchWithAuth<{ success: boolean; revokedCount: number }>(`${API_BASE}/auth/sessions/revoke-others`, {
-      method: 'POST',
-    });
-  },
-
-  // TOTP
-  async getTotpStatus() {
-    return fetchWithAuth<TotpStatus>(`${API_BASE}/auth/totp/status`);
-  },
-
-  async setupTotp() {
-    return fetchWithAuth<TotpSetupResponse>(`${API_BASE}/auth/totp/setup`, {
-      method: 'POST',
-    });
-  },
-
-  async verifyTotp(code: string) {
-    return fetchWithAuth<{ success: boolean; message: string }>(`${API_BASE}/auth/totp/verify`, {
-      method: 'POST',
-      body: JSON.stringify({ code }),
-    });
-  },
-
-  async disableTotp(password: string) {
-    return fetchWithAuth<{ success: boolean; message: string }>(`${API_BASE}/auth/totp/disable`, {
-      method: 'POST',
-      body: JSON.stringify({ password }),
-    });
-  },
-
-  async regenerateBackupCodes() {
-    return fetchWithAuth<{ backupCodes: string[] }>(`${API_BASE}/auth/totp/backup-codes`, {
-      method: 'POST',
-    });
   },
 
   // Admin: Reset user's 2FA
@@ -487,56 +409,6 @@ export const api = {
     return fetchWithAuth<{ success: boolean }>(`${API_BASE}/auth/users/${userId}/system-admin`, {
       method: 'PUT',
       body: JSON.stringify({ isSystemAdmin }),
-    });
-  },
-
-  // Groups
-  async getGroups() {
-    return fetchWithAuth<Group[]>(`${API_BASE}/auth/groups`);
-  },
-
-  async getGroup(groupId: string) {
-    return fetchWithAuth<GroupWithMembers>(`${API_BASE}/auth/groups/${groupId}`);
-  },
-
-  async createGroup(name: string, description?: string, totpRequired?: boolean) {
-    return fetchWithAuth<Group>(`${API_BASE}/auth/groups`, {
-      method: 'POST',
-      body: JSON.stringify({ name, description, totpRequired }),
-    });
-  },
-
-  async updateGroup(groupId: string, updates: { name?: string; description?: string; totpRequired?: boolean }) {
-    return fetchWithAuth<Group>(`${API_BASE}/auth/groups/${groupId}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  },
-
-  async deleteGroup(groupId: string) {
-    return fetchWithAuth<void>(`${API_BASE}/auth/groups/${groupId}`, {
-      method: 'DELETE',
-    });
-  },
-
-  // Group membership
-  async addUserToGroup(groupId: string, userId: string, role: 'admin' | 'operator' | 'viewer') {
-    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/auth/groups/${groupId}/members`, {
-      method: 'POST',
-      body: JSON.stringify({ userId, role }),
-    });
-  },
-
-  async updateUserGroupRole(groupId: string, userId: string, role: 'admin' | 'operator' | 'viewer') {
-    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/auth/groups/${groupId}/members/${userId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ role }),
-    });
-  },
-
-  async removeUserFromGroup(groupId: string, userId: string) {
-    return fetchWithAuth<void>(`${API_BASE}/auth/groups/${groupId}/members/${userId}`, {
-      method: 'DELETE',
     });
   },
 
@@ -598,120 +470,6 @@ export const api = {
       method: 'DELETE',
     });
   },
-
-  // Caddy HA
-  async getHAConfig() {
-    return fetchWithAuth<HAConfig | { enabled: false; configured: false }>(`${API_BASE}/caddy-ha/config`);
-  },
-
-  async configureHA(data: ConfigureHAData) {
-    return fetchWithAuth<HAConfig>(`${API_BASE}/caddy-ha/config`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async setHAEnabled(enabled: boolean) {
-    return fetchWithAuth<{ success: boolean; enabled: boolean }>(`${API_BASE}/caddy-ha/config/enabled`, {
-      method: 'PUT',
-      body: JSON.stringify({ enabled }),
-    });
-  },
-
-  async getCaddyInstances() {
-    return fetchWithAuth<CaddyInstance[]>(`${API_BASE}/caddy-ha/instances`);
-  },
-
-  async registerCaddyInstance(data: RegisterCaddyInstanceData) {
-    return fetchWithAuth<CaddyInstance>(`${API_BASE}/caddy-ha/instances`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async setCaddyInstancePriority(instanceId: string, priority: number) {
-    return fetchWithAuth<{ success: boolean; priority: number }>(`${API_BASE}/caddy-ha/instances/${instanceId}/priority`, {
-      method: 'PUT',
-      body: JSON.stringify({ priority }),
-    });
-  },
-
-  async promoteCaddyInstance(instanceId: string) {
-    return fetchWithAuth<{ success: boolean }>(`${API_BASE}/caddy-ha/instances/${instanceId}/promote`, {
-      method: 'POST',
-    });
-  },
-
-  async unregisterCaddyInstance(instanceId: string) {
-    return fetchWithAuth<void>(`${API_BASE}/caddy-ha/instances/${instanceId}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async syncKeepalived() {
-    return fetchWithAuth<SyncResult>(`${API_BASE}/caddy-ha/sync/keepalived`, {
-      method: 'POST',
-    });
-  },
-
-  async syncCaddyConfig() {
-    return fetchWithAuth<{ success: boolean; error?: string }>(`${API_BASE}/caddy-ha/sync/config`, {
-      method: 'POST',
-    });
-  },
-
-  // Certificates
-  async getCertificates(options?: { type?: string; includeRevoked?: boolean }) {
-    const params = new URLSearchParams();
-    if (options?.type) params.set('type', options.type);
-    if (options?.includeRevoked) params.set('includeRevoked', 'true');
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return fetchWithAuth<CertificateInfo[]>(`${API_BASE}/certificates${query}`);
-  },
-
-  async getCertificate(id: string) {
-    return fetchWithAuth<Certificate>(`${API_BASE}/certificates/${id}`);
-  },
-
-  async issueCertificate(data: IssueCertificateData) {
-    return fetchWithAuth<Certificate>(`${API_BASE}/certificates`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async renewCertificate(certId: string, validityHours?: number) {
-    return fetchWithAuth<Certificate>(`${API_BASE}/certificates/${certId}/renew`, {
-      method: 'POST',
-      body: JSON.stringify({ validityHours }),
-    });
-  },
-
-  async revokeCertificate(certId: string, reason: string) {
-    return fetchWithAuth<void>(`${API_BASE}/certificates/${certId}/revoke`, {
-      method: 'POST',
-      body: JSON.stringify({ reason }),
-    });
-  },
-
-  async getCertRenewalStatus() {
-    return fetchWithAuth<CertRenewalStatus>(`${API_BASE}/certificates/renewal/status`);
-  },
-
-  async triggerCertRenewal() {
-    return fetchWithAuth<CertRenewalResult>(`${API_BASE}/certificates/renewal/trigger`, {
-      method: 'POST',
-    });
-  },
-
-  async getSystemAppsStatus() {
-    return fetchWithAuth<SystemAppsStatus>(`${API_BASE}/system/apps`);
-  },
-
-  // Proxy Routes
-  async getProxyRoutes() {
-    return fetchWithAuth<ProxyRoute[]>(`${API_BASE}/proxy-routes`);
-  },
 };
 
 // Types
@@ -746,24 +504,6 @@ export interface UserInfo {
   created_at: string;
   last_login_at: string | null;
   groups: UserGroupMembership[];
-}
-
-export interface Group {
-  id: string;
-  name: string;
-  description: string | null;
-  totp_required: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface GroupWithMembers extends Group {
-  members: Array<{
-    userId: string;
-    username: string;
-    role: 'admin' | 'operator' | 'viewer';
-    isSystemAdmin: boolean;
-  }>;
 }
 
 export interface Server {
@@ -815,15 +555,6 @@ export interface Deployment {
   updatedAt: string;
 }
 
-export interface Service {
-  id: string;
-  serviceName: string;
-  serverId: string;
-  host: string;
-  port: number;
-  status: string;
-}
-
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
@@ -842,46 +573,6 @@ export interface SystemStatus {
   servers: { total: number; online: number };
   deployments: { total: number; running: number };
   timestamp: string;
-}
-
-export interface AuditLogEntry {
-  id: number;
-  timestamp: string;
-  userId: string | null;
-  username: string | null;
-  action: string;
-  resourceType: string | null;
-  resourceId: string | null;
-  ipAddress: string | null;
-  details: Record<string, unknown> | null;
-}
-
-export interface AuditLogsResponse {
-  logs: AuditLogEntry[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-export interface SessionInfo {
-  id: string;
-  ipAddress: string | null;
-  userAgent: string | null;
-  createdAt: string;
-  lastUsedAt: string | null;
-  expiresAt: string;
-  isCurrent: boolean;
-}
-
-export interface TotpStatus {
-  enabled: boolean;
-  backupCodesRemaining: number;
-}
-
-export interface TotpSetupResponse {
-  secret: string;
-  qrCode: string;
-  backupCodes: string[];
 }
 
 export interface LoginResponse {
@@ -1006,133 +697,4 @@ export function extractData<T>(response: T[] | PaginatedResponse<T>): T[] {
     return response;
   }
   return response.data;
-}
-
-// Caddy HA types
-export interface HAConfig {
-  id: string;
-  vipAddress: string;
-  vipInterface: string;
-  vrrpRouterId: number;
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ConfigureHAData {
-  vipAddress: string;
-  vipInterface?: string;
-  vrrpRouterId?: number;
-  vrrpAuthPass?: string;
-}
-
-export interface CaddyInstance {
-  id: string;
-  deploymentId: string;
-  haConfigId: string | null;
-  vrrpPriority: number;
-  isPrimary: boolean;
-  adminApiUrl: string | null;
-  lastConfigSync: string | null;
-  lastCertSync: string | null;
-  status: 'pending' | 'active' | 'error';
-  statusMessage: string | null;
-  serverId: string;
-  serverName: string;
-  serverHost: string | null;
-  deploymentStatus: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface RegisterCaddyInstanceData {
-  deploymentId: string;
-  vrrpPriority?: number;
-  isPrimary?: boolean;
-  adminApiUrl?: string;
-}
-
-export interface SyncResult {
-  success: boolean;
-  results: Array<{
-    instanceId: string;
-    success: boolean;
-    error?: string;
-  }>;
-}
-
-// Certificate types
-export interface CertificateInfo {
-  id: string;
-  name: string;
-  type: 'server' | 'client' | 'ca';
-  subjectCn: string;
-  subjectSans: string[] | null;
-  serialNumber: string;
-  notBefore: string;
-  notAfter: string;
-  issuedToServerId: string | null;
-  issuedToDeploymentId: string | null;
-  revokedAt: string | null;
-  createdAt: string;
-  expiresInDays: number;
-}
-
-export interface Certificate extends CertificateInfo {
-  certPem: string;
-  keyPem: string;
-  caCertPem: string;
-}
-
-export interface IssueCertificateData {
-  name: string;
-  type: 'server' | 'client';
-  commonName: string;
-  sans?: string[];
-  validityHours?: number;
-  issuedToServerId?: string;
-  issuedToDeploymentId?: string;
-}
-
-export interface CertRenewalStatus {
-  nextCheckAt: string | null;
-  thresholdDays: number;
-  expiringCount: number;
-  expiringSoon: Array<{
-    id: string;
-    name: string;
-    cn: string;
-    expiresAt: string;
-    daysUntilExpiry: number;
-  }>;
-}
-
-export interface CertRenewalResult {
-  checked: number;
-  renewed: number;
-  failed: number;
-  details: Array<{
-    certId: string;
-    name: string;
-    success: boolean;
-    error?: string;
-  }>;
-}
-
-export interface SystemAppsStatus {
-  apps: Array<{
-    name: string;
-    displayName: string;
-    installed: boolean;
-    status?: string;
-  }>;
-  allInstalled: boolean;
-}
-
-export interface ProxyRoute {
-  path: string;
-  upstream: string;
-  appName: string;
-  serverName: string;
-  active: boolean;
 }

@@ -4,6 +4,8 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { randomUUID } from 'crypto';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import authRouter from './routes/auth.js';
 import serversRouter from './routes/servers.js';
 import appsRouter from './routes/apps.js';
@@ -11,13 +13,10 @@ import deploymentsRouter from './routes/deployments.js';
 import servicesRouter from './routes/services.js';
 import systemRouter from './routes/system.js';
 import proxyRouter from './routes/proxy.js';
-import auditRouter from './routes/audit.js';
 import agentRouter from './routes/agent.js';
 import certificateRouter from './routes/certificate.js';
-import certificatesRouter from './routes/certificates.js';
 import commandsRouter from './routes/commands.js';
 import mountsRouter from './routes/mounts.js';
-import caddyHARouter from './routes/caddyHA.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { devBypassAuth, AuthenticatedRequest } from './middleware/auth.js';
 import { csrfProtection } from './middleware/csrf.js';
@@ -237,25 +236,26 @@ export function createApi(): express.Application {
   // Certificate routes (unauthenticated - needed before users can trust the site)
   app.use('/api/certificate', certificateRouter);
 
-  // ==========================================================================
-  // CSRF Protection Strategy
-  // ==========================================================================
-  // CSRF protection is intentionally applied at different levels:
-  //
-  // App-level CSRF (via csrfProtection middleware):
-  //   - /api/servers, /api/deployments, /api/mounts, /api/certificates
-  //   - All routes in these routers require CSRF tokens for state-changing requests
-  //
-  // Per-route CSRF (applied within route handlers):
-  //   - /api/system - Mixed read/write endpoints, CSRF on write operations only
-  //   - /api/caddy-ha - Mixed read/write endpoints, CSRF on write operations only
-  //
-  // No CSRF required (read-only endpoints):
-  //   - /api/apps - App manifest listing (GET only)
-  //   - /api/services - Service discovery (GET only)
-  //   - /api/commands - Command log viewing (GET only)
-  //   - /api/audit-logs - Audit log viewing (GET only)
-  // ==========================================================================
+  // App icons (unauthenticated - just static assets)
+  app.get('/api/apps/:name/icon', (req, res) => {
+    const appDefsPath = config.paths.appDefinitions;
+    const appDir = join(appDefsPath, req.params.name);
+
+    const pngPath = join(appDir, 'icon.png');
+    const svgPath = join(appDir, 'icon.svg');
+
+    if (existsSync(pngPath)) {
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.sendFile(pngPath);
+    } else if (existsSync(svgPath)) {
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.sendFile(svgPath);
+    } else {
+      res.status(404).json({ error: 'Icon not found' });
+    }
+  });
 
   // Protected API routes - use devBypassAuth for development convenience, csrfProtection for CSRF defense
   app.use('/api/servers', devBypassAuth, csrfProtection, serversRouter);
@@ -263,11 +263,8 @@ export function createApi(): express.Application {
   app.use('/api/deployments', devBypassAuth, csrfProtection, deploymentsRouter);
   app.use('/api/services', devBypassAuth, servicesRouter); // Read-only, no CSRF needed
   app.use('/api/system', devBypassAuth, systemRouter); // Has both read and write ops, CSRF applied per-route
-  app.use('/api/audit-logs', devBypassAuth, auditRouter); // Read-only, no CSRF needed
   app.use('/api/commands', devBypassAuth, commandsRouter); // Read-only, no CSRF needed
   app.use('/api/mounts', devBypassAuth, csrfProtection, mountsRouter);
-  app.use('/api/certificates', devBypassAuth, csrfProtection, certificatesRouter);
-  app.use('/api/caddy-ha', devBypassAuth, caddyHARouter); // Has own CSRF per-route
 
   // Error handling
   app.use('/api/*', notFoundHandler);

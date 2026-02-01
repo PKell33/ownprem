@@ -539,6 +539,19 @@ router.post('/users/:id/totp/reset', requireAuth, validateParams(schemas.idParam
 });
 
 /**
+ * GET /api/auth/setup
+ * Check if initial setup is needed (no users exist)
+ */
+router.get('/setup', (_req, res) => {
+  const db = getDb();
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+
+  res.json({
+    needsSetup: userCount.count === 0,
+  });
+});
+
+/**
  * POST /api/auth/setup
  * Initial system admin user setup (only works if no users exist)
  */

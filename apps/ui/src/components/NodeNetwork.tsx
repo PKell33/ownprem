@@ -15,53 +15,99 @@ interface Node {
 const CONNECTION_DISTANCE = 150;
 const PULL_STRENGTH = 0.02;
 const DAMPING = 0.98;
-const MAX_VELOCITY = 0.4;
-const BASE_DRIFT = 0.05;
+
+// Base velocities are scaled by screen size
+const BASE_MAX_VELOCITY = 0.0004; // Multiplied by screen diagonal
+const BASE_DRIFT_FACTOR = 0.00008;
 
 const COLORS = {
   node: '#c0caf5',
   accent: '#7aa2f7',
-  connection: 'rgba(192, 202, 245, 0.15)',
 };
 
-export function NodeNetwork() {
+interface NodeNetworkProps {
+  /** Origin point where all nodes start (if not provided, nodes start randomly distributed) */
+  origin?: { x: number; y: number };
+  /** Number of nodes (defaults to area-based calculation) */
+  nodeCount?: number;
+  /** Initial expansion speed when using origin (default: 0.15) */
+  expansionSpeed?: number;
+  /** Whether to enable mouse/touch interaction (default: true) */
+  interactive?: boolean;
+}
+
+export function NodeNetwork({
+  origin,
+  nodeCount,
+  expansionSpeed = 0.15,
+  interactive = true,
+}: NodeNetworkProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const nodesRef = useRef<Node[]>([]);
   const animationRef = useRef<number>(0);
   const draggedNodeRef = useRef<Node | null>(null);
   const mouseRef = useRef({ x: 0, y: 0 });
 
-  const initNodes = useCallback((width: number, height: number) => {
+  const initNodes = useCallback((width: number, height: number, originPoint?: { x: number; y: number }) => {
     const area = width * height;
-    const count = Math.floor(area / 15000);
+    const diagonal = Math.sqrt(width * width + height * height);
+    const count = nodeCount ?? Math.floor(area / 15000);
     const nodes: Node[] = [];
 
+    // Scale velocities based on screen size
+    const scaledDrift = BASE_DRIFT_FACTOR * diagonal;
+    const scaledExpansion = expansionSpeed * diagonal * 0.001;
+
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = BASE_DRIFT * (0.5 + Math.random() * 0.5);
+      const angle = originPoint
+        ? (i / count) * Math.PI * 2 + Math.random() * 0.3
+        : Math.random() * Math.PI * 2;
+
+      const speed = originPoint
+        ? scaledExpansion * (0.5 + Math.random() * 0.5)
+        : scaledDrift * (0.5 + Math.random() * 0.5);
+
+      // Starting position
+      let x: number, y: number;
+      if (originPoint) {
+        // Start clustered at origin with small random offset
+        const offsetRadius = Math.random() * 5;
+        const offsetAngle = Math.random() * Math.PI * 2;
+        x = originPoint.x + Math.cos(offsetAngle) * offsetRadius;
+        y = originPoint.y + Math.sin(offsetAngle) * offsetRadius;
+      } else {
+        // Start randomly distributed
+        x = Math.random() * width;
+        y = Math.random() * height;
+      }
+
       nodes.push({
-        x: Math.random() * width,
-        y: Math.random() * height,
+        x,
+        y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        radius: 3 + Math.random() * 2,
-        isAccent: Math.random() < 0.15,
+        radius: originPoint ? 2 + Math.random() * 2 : 3 + Math.random() * 2,
+        isAccent: Math.random() < (originPoint ? 0.2 : 0.15),
         isDragged: false,
         targetAngle: angle,
-        angleChangeTimer: Math.random() * 200 + 100,
+        angleChangeTimer: Math.random() * (originPoint ? 100 : 200) + (originPoint ? 50 : 100),
       });
     }
 
     nodesRef.current = nodes;
-  }, []);
+  }, [nodeCount, expansionSpeed]);
 
   const updateNodes = useCallback((width: number, height: number) => {
     const nodes = nodesRef.current;
     const draggedNode = draggedNodeRef.current;
+    const diagonal = Math.sqrt(width * width + height * height);
+
+    // Scale velocities based on screen size
+    const maxVelocity = BASE_MAX_VELOCITY * diagonal;
+    const driftForce = BASE_DRIFT_FACTOR * diagonal * 0.05;
 
     for (const node of nodes) {
       if (node.isDragged) {
-        // Dragged node follows mouse smoothly
         const targetX = mouseRef.current.x;
         const targetY = mouseRef.current.y;
         node.vx = (targetX - node.x) * 0.3;
@@ -94,7 +140,6 @@ export function NodeNetwork() {
       }
 
       // Apply gentle drift force
-      const driftForce = BASE_DRIFT * 0.05;
       node.vx += Math.cos(node.targetAngle) * driftForce;
       node.vy += Math.sin(node.targetAngle) * driftForce;
 
@@ -104,9 +149,9 @@ export function NodeNetwork() {
 
       // Clamp velocity
       const speed = Math.sqrt(node.vx * node.vx + node.vy * node.vy);
-      if (speed > MAX_VELOCITY) {
-        node.vx = (node.vx / speed) * MAX_VELOCITY;
-        node.vy = (node.vy / speed) * MAX_VELOCITY;
+      if (speed > maxVelocity) {
+        node.vx = (node.vx / speed) * maxVelocity;
+        node.vy = (node.vy / speed) * maxVelocity;
       }
 
       // Update position
@@ -170,7 +215,6 @@ export function NodeNetwork() {
       ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
 
       if (node.isAccent) {
-        // Accent node with glow
         ctx.fillStyle = COLORS.accent;
         ctx.shadowColor = COLORS.accent;
         ctx.shadowBlur = 10;
@@ -210,8 +254,8 @@ export function NodeNetwork() {
     canvas.width = width;
     canvas.height = height;
 
-    initNodes(width, height);
-  }, [initNodes]);
+    initNodes(width, height, origin);
+  }, [initNodes, origin]);
 
   const findNodeAt = useCallback((x: number, y: number): Node | null => {
     const nodes = nodesRef.current;
@@ -227,6 +271,7 @@ export function NodeNetwork() {
   }, []);
 
   const handleMouseDown = useCallback((e: MouseEvent) => {
+    if (!interactive) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -239,7 +284,7 @@ export function NodeNetwork() {
       node.isDragged = true;
       draggedNodeRef.current = node;
     }
-  }, [findNodeAt]);
+  }, [findNodeAt, interactive]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -254,15 +299,21 @@ export function NodeNetwork() {
   const handleMouseUp = useCallback(() => {
     if (draggedNodeRef.current) {
       draggedNodeRef.current.isDragged = false;
-      // Give a small random velocity on release
       const angle = Math.random() * Math.PI * 2;
-      draggedNodeRef.current.vx = Math.cos(angle) * BASE_DRIFT;
-      draggedNodeRef.current.vy = Math.sin(angle) * BASE_DRIFT;
+      // Calculate scaled drift based on current canvas size
+      const canvas = canvasRef.current;
+      const diagonal = canvas
+        ? Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height)
+        : 1000;
+      const drift = BASE_DRIFT_FACTOR * diagonal;
+      draggedNodeRef.current.vx = Math.cos(angle) * drift;
+      draggedNodeRef.current.vy = Math.sin(angle) * drift;
       draggedNodeRef.current = null;
     }
   }, []);
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
+    if (!interactive) return;
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -277,7 +328,7 @@ export function NodeNetwork() {
       node.isDragged = true;
       draggedNodeRef.current = node;
     }
-  }, [findNodeAt]);
+  }, [findNodeAt, interactive]);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     if (e.touches.length === 0) return;
@@ -300,34 +351,34 @@ export function NodeNetwork() {
     window.addEventListener('resize', handleResize);
 
     const canvas = canvasRef.current;
-    if (canvas) {
+    if (canvas && interactive) {
+      // Mousedown on canvas to start drag
       canvas.addEventListener('mousedown', handleMouseDown);
-      canvas.addEventListener('mousemove', handleMouseMove);
-      canvas.addEventListener('mouseup', handleMouseUp);
-      canvas.addEventListener('mouseleave', handleMouseUp);
+      // Mousemove and mouseup on window to continue drag even over other elements
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
       canvas.addEventListener('touchstart', handleTouchStart, { passive: true });
-      canvas.addEventListener('touchmove', handleTouchMove, { passive: true });
-      canvas.addEventListener('touchend', handleTouchEnd);
+      window.addEventListener('touchmove', handleTouchMove, { passive: true });
+      window.addEventListener('touchend', handleTouchEnd);
     }
 
     animationRef.current = requestAnimationFrame(animate);
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      if (canvas) {
+      if (canvas && interactive) {
         canvas.removeEventListener('mousedown', handleMouseDown);
-        canvas.removeEventListener('mousemove', handleMouseMove);
-        canvas.removeEventListener('mouseup', handleMouseUp);
-        canvas.removeEventListener('mouseleave', handleMouseUp);
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
         canvas.removeEventListener('touchstart', handleTouchStart);
-        canvas.removeEventListener('touchmove', handleTouchMove);
-        canvas.removeEventListener('touchend', handleTouchEnd);
+        window.removeEventListener('touchmove', handleTouchMove);
+        window.removeEventListener('touchend', handleTouchEnd);
       }
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [handleResize, handleMouseDown, handleMouseMove, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd, animate]);
+  }, [handleResize, handleMouseDown, handleMouseMove, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd, animate, interactive]);
 
   return (
     <canvas

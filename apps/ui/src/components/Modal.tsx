@@ -98,6 +98,11 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
         backgroundColor: 'var(--bg-secondary, #24283b)',
         border: '1px solid var(--border-color, #292e42)',
         color: 'inherit',
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        margin: 0,
       }}
     >
       {/* Header */}

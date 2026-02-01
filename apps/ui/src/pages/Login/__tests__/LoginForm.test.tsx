@@ -5,10 +5,12 @@ import LoginForm from '../views/LoginForm';
 
 // Mock the API
 const mockLogin = vi.fn();
+const mockCheckSetup = vi.fn();
 
 vi.mock('../../../api/client', () => ({
   api: {
     login: (...args: unknown[]) => mockLogin(...args),
+    checkSetup: () => mockCheckSetup(),
   },
 }));
 
@@ -19,7 +21,6 @@ const mockState = {
   setError: vi.fn(),
   setLoading: vi.fn(),
   clearError: vi.fn(),
-  setTotpSetupRequired: vi.fn(),
 };
 
 vi.mock('../../../stores/useAuthStore', () => ({
@@ -28,7 +29,6 @@ vi.mock('../../../stores/useAuthStore', () => ({
 
 describe('LoginForm', () => {
   const defaultProps = {
-    onTotpRequired: vi.fn(),
     onSetupRequired: vi.fn(),
     onSuccess: vi.fn(),
   };
@@ -36,13 +36,14 @@ describe('LoginForm', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.isLoading = false;
+    mockCheckSetup.mockResolvedValue({ needsSetup: false });
   });
 
   it('renders username and password fields', () => {
     render(<LoginForm {...defaultProps} />);
 
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
   });
 
   it('renders sign in button', () => {
@@ -61,14 +62,14 @@ describe('LoginForm', () => {
   it('password input has correct autocomplete attribute', () => {
     render(<LoginForm {...defaultProps} />);
 
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText('Password');
     expect(passwordInput).toHaveAttribute('autocomplete', 'current-password');
   });
 
   it('password input is of type password', () => {
     render(<LoginForm {...defaultProps} />);
 
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText('Password');
     expect(passwordInput).toHaveAttribute('type', 'password');
   });
 
@@ -82,7 +83,7 @@ describe('LoginForm', () => {
   it('password field is required', () => {
     render(<LoginForm {...defaultProps} />);
 
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText('Password');
     expect(passwordInput).toHaveAttribute('aria-required', 'true');
   });
 
@@ -91,7 +92,7 @@ describe('LoginForm', () => {
     render(<LoginForm {...defaultProps} />);
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText('Password');
 
     // Focus and then blur username without entering value
     await user.click(usernameInput);
@@ -113,7 +114,7 @@ describe('LoginForm', () => {
     render(<LoginForm {...defaultProps} />);
 
     await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(mockState.clearError).toHaveBeenCalled();
@@ -126,32 +127,10 @@ describe('LoginForm', () => {
     render(<LoginForm {...defaultProps} />);
 
     await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(mockState.setLoading).toHaveBeenCalledWith(true);
-  });
-
-  it('calls onTotpRequired when 2FA is needed', async () => {
-    const user = userEvent.setup();
-    mockLogin.mockResolvedValueOnce({
-      totpRequired: true,
-    });
-
-    const onTotpRequired = vi.fn();
-
-    render(<LoginForm {...defaultProps} onTotpRequired={onTotpRequired} />);
-
-    await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
-
-    await waitFor(() => {
-      expect(onTotpRequired).toHaveBeenCalledWith({
-        username: 'testuser',
-        password: 'password123',
-      });
-    });
   });
 
   it('calls onSetupRequired when no users exist', async () => {
@@ -163,7 +142,7 @@ describe('LoginForm', () => {
     render(<LoginForm {...defaultProps} onSetupRequired={onSetupRequired} />);
 
     await user.type(screen.getByLabelText(/username/i), 'admin');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -182,11 +161,11 @@ describe('LoginForm', () => {
     render(<LoginForm {...defaultProps} onSuccess={onSuccess} />);
 
     await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(onSuccess).toHaveBeenCalledWith('/', false);
+      expect(onSuccess).toHaveBeenCalledWith('/');
     });
   });
 
@@ -197,7 +176,7 @@ describe('LoginForm', () => {
     render(<LoginForm {...defaultProps} />);
 
     await user.type(screen.getByLabelText(/username/i), 'testuser');
-    await user.type(screen.getByLabelText(/password/i), 'wrongpass');
+    await user.type(screen.getByLabelText('Password'), 'wrongpass');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
@@ -214,7 +193,7 @@ describe('LoginForm', () => {
     render(<LoginForm {...defaultProps} />);
 
     await user.type(screen.getByLabelText(/username/i), 'myuser');
-    await user.type(screen.getByLabelText(/password/i), 'mypassword');
+    await user.type(screen.getByLabelText('Password'), 'mypassword');
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {

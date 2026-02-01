@@ -52,7 +52,7 @@ function loadAppManifests(): AppManifest[] {
   return apps;
 }
 
-function syncAppRegistry(): void {
+export function syncAppRegistry(): void {
   const db = getDb();
   const manifests = loadAppManifests();
 

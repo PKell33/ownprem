@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Package } from 'lucide-react';
 
 interface AppIconProps {
@@ -6,31 +7,21 @@ interface AppIconProps {
   className?: string;
 }
 
-// Map of app names to their icon files
-// Apps can provide custom icons in /public/icons/
-const appIcons: Record<string, string> = {
-  'bitcoin-core': '/icons/bitcoin-core.svg',
-  'bitcoin-knots': '/icons/bitcoin-knots.png',
-  'bitcoin-bip110': '/icons/bitcoin-bip110.png',
-  'electrs': '/icons/electrs.png',
-  'mempool': '/icons/mempool.png',
-};
-
 export default function AppIcon({ appName, size = 24, className = '' }: AppIconProps) {
-  const iconPath = appIcons[appName];
+  const [hasError, setHasError] = useState(false);
 
-  if (iconPath) {
-    return (
-      <img
-        src={iconPath}
-        alt={`${appName} icon`}
-        width={size}
-        height={size}
-        className={className}
-      />
-    );
+  if (hasError) {
+    return <Package size={size} className={className} />;
   }
 
-  // Fallback to generic package icon
-  return <Package size={size} className={className} />;
+  return (
+    <img
+      src={`/api/apps/${appName}/icon`}
+      alt={`${appName} icon`}
+      width={size}
+      height={size}
+      className={className}
+      onError={() => setHasError(true)}
+    />
+  );
 }
