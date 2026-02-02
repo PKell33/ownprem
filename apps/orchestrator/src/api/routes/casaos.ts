@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { requireAuth } from '../middleware/auth.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import { Errors } from '../middleware/error.js';
@@ -12,6 +13,7 @@ import { casaosStoreService } from '../../services/casaosStoreService.js';
 import { config } from '../../config.js';
 import { z } from 'zod';
 import { proxyImage, getGalleryUrls } from '../utils/imageProxy.js';
+import { broadcastSyncProgress, broadcastSyncComplete } from '../../websocket/broadcast.js';
 
 const router = Router();
 
@@ -209,19 +211,50 @@ router.post('/apps/sync', requireAuth, async (req, res, next) => {
       }
     }
 
-    const result = await casaosStoreService.syncApps(registryId);
+    const syncId = randomUUID();
+    const startTime = Date.now();
 
-    const parts = [];
-    if (result.synced > 0) parts.push(`${result.synced} new`);
-    if (result.updated > 0) parts.push(`${result.updated} updated`);
-    if (result.removed > 0) parts.push(`${result.removed} removed`);
-    const summary = parts.length > 0 ? parts.join(', ') : 'No changes';
+    const result = await casaosStoreService.syncApps(registryId, {
+      onProgress: (data) => {
+        broadcastSyncProgress({
+          syncId,
+          storeType: 'casaos',
+          registryId: data.registryId,
+          registryName: data.registryName,
+          phase: data.phase,
+          currentApp: data.currentApp,
+          processed: data.processed,
+          total: data.total,
+          errors: data.errors,
+        });
+      },
+    });
+
+    const duration = Date.now() - startTime;
 
     let registryName = 'CasaOS';
     if (registryId) {
       const registry = await casaosStoreService.getRegistry(registryId);
       registryName = registry?.name || registryId;
     }
+
+    broadcastSyncComplete({
+      syncId,
+      storeType: 'casaos',
+      registryId: registryId || 'all',
+      registryName,
+      synced: result.synced,
+      updated: result.updated,
+      removed: result.removed,
+      errors: result.errors,
+      duration,
+    });
+
+    const parts = [];
+    if (result.synced > 0) parts.push(`${result.synced} new`);
+    if (result.updated > 0) parts.push(`${result.updated} updated`);
+    if (result.removed > 0) parts.push(`${result.removed} removed`);
+    const summary = parts.length > 0 ? parts.join(', ') : 'No changes';
 
     res.json({
       synced: result.synced,

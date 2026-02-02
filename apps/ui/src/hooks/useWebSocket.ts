@@ -3,7 +3,8 @@ import { io, Socket } from 'socket.io-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStore } from '../stores/useStore';
 import { useMetricsStore } from '../stores/useMetricsStore';
-import { showCommandResult } from '../lib/toast';
+import { useSyncProgressStore } from '../stores/useSyncProgressStore';
+import { showCommandResult, showError } from '../lib/toast';
 import type { Server, Deployment } from '../api/client';
 
 export function useWebSocket() {
@@ -13,6 +14,8 @@ export function useWebSocket() {
   // This prevents re-renders when history updates
   const setConnected = useStore((state) => state.setConnected);
   const addMetrics = useMetricsStore((state) => state.addMetrics);
+  const updateSyncProgress = useSyncProgressStore((state) => state.updateProgress);
+  const setSyncComplete = useSyncProgressStore((state) => state.setComplete);
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) {
@@ -140,8 +143,30 @@ export function useWebSocket() {
       }
     });
 
+    // Sync progress events
+    socket.on('sync:progress', (data: SyncProgressEvent) => {
+      updateSyncProgress(data);
+    });
+
+    socket.on('sync:complete', (data: SyncCompleteEvent) => {
+      setSyncComplete(data);
+
+      // Show toast for errors if any
+      if (data.errors.length > 0) {
+        const iconErrors = data.errors.filter(e => e.startsWith('Icon missing:'));
+        const otherErrors = data.errors.filter(e => !e.startsWith('Icon missing:'));
+
+        if (otherErrors.length > 0) {
+          showError(`Sync completed with ${otherErrors.length} error(s)`);
+        } else if (iconErrors.length > 0) {
+          // Just log icon errors, don't show toast (too noisy)
+          console.warn(`${iconErrors.length} icons failed to download`);
+        }
+      }
+    });
+
     socketRef.current = socket;
-  }, [setConnected, addMetrics, queryClient]);
+  }, [setConnected, addMetrics, queryClient, updateSyncProgress, setSyncComplete]);
 
   const disconnect = useCallback(() => {
     if (socketRef.current) {
@@ -194,4 +219,30 @@ interface CommandResultEvent {
   action?: string;
   status: 'success' | 'error';
   message?: string;
+}
+
+interface SyncProgressEvent {
+  syncId: string;
+  storeType: string;
+  registryId: string;
+  registryName: string;
+  phase: 'fetching' | 'processing' | 'complete';
+  currentApp?: string;
+  processed: number;
+  total: number;
+  errors: string[];
+  timestamp: string;
+}
+
+interface SyncCompleteEvent {
+  syncId: string;
+  storeType: string;
+  registryId: string;
+  registryName: string;
+  synced: number;
+  updated: number;
+  removed: number;
+  errors: string[];
+  duration: number;
+  timestamp: string;
 }

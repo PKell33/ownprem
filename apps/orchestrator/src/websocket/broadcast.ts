@@ -45,3 +45,53 @@ export function broadcastDeploymentStatus(data: {
     });
   }
 }
+
+// ==================== Sync Progress Events ====================
+
+export interface SyncProgressData {
+  syncId: string;
+  storeType: string;
+  registryId: string;
+  registryName: string;
+  phase: 'fetching' | 'processing' | 'complete';
+  currentApp?: string;
+  processed: number;
+  total: number;
+  errors: string[];
+}
+
+export interface SyncCompleteData {
+  syncId: string;
+  storeType: string;
+  registryId: string;
+  registryName: string;
+  synced: number;
+  updated: number;
+  removed: number;
+  errors: string[];
+  duration: number;
+}
+
+/**
+ * Broadcast sync progress to authenticated UI clients.
+ */
+export function broadcastSyncProgress(data: SyncProgressData): void {
+  if (io) {
+    io.to('authenticated').emit('sync:progress', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
+/**
+ * Broadcast sync completion to authenticated UI clients.
+ */
+export function broadcastSyncComplete(data: SyncCompleteData): void {
+  if (io) {
+    io.to('authenticated').emit('sync:complete', {
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}

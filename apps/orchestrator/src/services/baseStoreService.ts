@@ -62,6 +62,21 @@ export interface SyncResult {
 }
 
 /**
+ * Progress callback for sync operations
+ */
+export interface SyncProgressCallback {
+  onProgress: (data: {
+    registryId: string;
+    registryName: string;
+    phase: 'fetching' | 'processing' | 'complete';
+    currentApp?: string;
+    processed: number;
+    total: number;
+    errors: string[];
+  }) => void;
+}
+
+/**
  * Default registry configuration
  */
 export interface DefaultRegistry {
@@ -479,8 +494,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
   /**
    * Sync apps from registries
    * @param registryId Optional - sync only this registry
+   * @param progressCallback Optional - callback for progress updates
    */
-  async syncApps(registryId?: string): Promise<SyncResult> {
+  async syncApps(registryId?: string, progressCallback?: SyncProgressCallback): Promise<SyncResult> {
     await this.initialize();
 
     const db = getDb();
@@ -507,17 +523,41 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
 
     for (const registry of registriesToSync) {
       syncedAppIds.set(registry.id, new Set());
+      let processed = 0;
 
       try {
         this.log.info({ store: this.storeName, registry: registry.name, url: registry.url }, 'Syncing registry');
+
+        // Emit fetching phase
+        progressCallback?.onProgress({
+          registryId: registry.id,
+          registryName: registry.name,
+          phase: 'fetching',
+          processed: 0,
+          total: 0,
+          errors: [],
+        });
 
         // Fetch all apps from registry (store-specific implementation)
         const fetchedApps = await this.fetchAppsFromRegistry(registry);
         this.log.info({ store: this.storeName, registry: registry.name, count: fetchedApps.length }, 'Fetched apps');
 
+        const total = fetchedApps.length;
+
         // Process each app
         for (const fetchedApp of fetchedApps) {
           try {
+            // Emit processing progress
+            progressCallback?.onProgress({
+              registryId: registry.id,
+              registryName: registry.name,
+              phase: 'processing',
+              currentApp: fetchedApp.id,
+              processed,
+              total,
+              errors: [...errors],
+            });
+
             // Check if app exists and get its version
             const existing = db.prepare(
               `SELECT id, data FROM ${APP_CACHE_TABLE} WHERE id = ? AND registry = ? AND store_type = ?`
@@ -550,12 +590,25 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
             } else {
               synced++;
             }
+
+            processed++;
           } catch (err) {
             const msg = `Failed to process ${fetchedApp.id}: ${err instanceof Error ? err.message : String(err)}`;
             errors.push(msg);
             this.log.warn({ store: this.storeName, appId: fetchedApp.id, registry: registry.id, error: err }, msg);
+            processed++;
           }
         }
+
+        // Emit registry complete
+        progressCallback?.onProgress({
+          registryId: registry.id,
+          registryName: registry.name,
+          phase: 'complete',
+          processed: total,
+          total,
+          errors: [...errors],
+        });
 
         // Update registry last_sync time
         db.prepare(
@@ -566,6 +619,16 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
         const msg = `Failed to sync ${registry.name}: ${err instanceof Error ? err.message : String(err)}`;
         errors.push(msg);
         this.log.error({ store: this.storeName, registry: registry.id, error: err }, msg);
+
+        // Emit error in progress
+        progressCallback?.onProgress({
+          registryId: registry.id,
+          registryName: registry.name,
+          phase: 'complete',
+          processed: 0,
+          total: 0,
+          errors: [...errors],
+        });
       }
     }
 
