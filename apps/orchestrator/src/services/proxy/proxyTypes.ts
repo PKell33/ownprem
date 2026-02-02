@@ -3,6 +3,11 @@
  * Shared across proxy-related modules.
  */
 
+import { ProxyRouteRow, ServiceRouteRow } from '../../db/types.js';
+
+// Re-export base types
+export type { ProxyRouteRow, ServiceRouteRow };
+
 export interface ProxyRoute {
   id: string;
   path: string;
@@ -24,23 +29,9 @@ export interface ServiceRoute {
   serverName: string;
 }
 
-export interface ProxyRouteRow {
-  id: string;
-  deployment_id: string;
-  path: string;
-  upstream: string;
-  active: number;
-}
-
-export interface ServiceRouteRow {
-  id: string;
-  service_id: string;
+// Extended row type with JOIN fields for queries
+export interface ServiceRouteRowWithJoins extends ServiceRouteRow {
   service_name: string;
-  route_type: string;
-  external_path: string | null;
-  external_port: number | null;
-  upstream_host: string;
-  upstream_port: number;
   app_name: string;
   server_name: string;
 }

@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { getDb } from '../../db/index.js';
+import { CommandLogRow } from '../../db/types.js';
+import { filter } from '../../db/queryBuilder.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { validateParams, validateQuery, schemas } from '../middleware/validate.js';
 
@@ -8,18 +10,6 @@ const router = Router();
 
 // Infer the validated query type from the schema
 type CommandsQuery = z.infer<typeof schemas.query.commands>;
-
-interface CommandLogRow {
-  id: string;
-  server_id: string;
-  deployment_id: string | null;
-  action: string;
-  payload: string | null;
-  status: string;
-  result_message: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
 
 /**
  * GET /api/commands
@@ -37,27 +27,14 @@ router.get('/', validateQuery(schemas.query.commands), (req: AuthenticatedReques
   const { serverId, deploymentId, action, status, limit, offset } = req.query as unknown as CommandsQuery;
 
   const db = getDb();
-  const conditions: string[] = [];
-  const params: unknown[] = [];
 
-  if (serverId) {
-    conditions.push('cl.server_id = ?');
-    params.push(serverId);
-  }
-  if (deploymentId) {
-    conditions.push('cl.deployment_id = ?');
-    params.push(deploymentId);
-  }
-  if (action) {
-    conditions.push('cl.action = ?');
-    params.push(action);
-  }
-  if (status) {
-    conditions.push('cl.status = ?');
-    params.push(status);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  // Build filter using FilterBuilder (use table alias prefix for JOINed query)
+  const { whereClause, params } = filter()
+    .equals('cl.server_id', serverId)
+    .equals('cl.deployment_id', deploymentId)
+    .equals('cl.action', action)
+    .equals('cl.status', status)
+    .build();
 
   // Get total count
   const countRow = db.prepare(`SELECT COUNT(*) as count FROM command_log cl ${whereClause}`).get(...params) as { count: number };

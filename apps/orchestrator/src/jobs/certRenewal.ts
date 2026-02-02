@@ -1,4 +1,5 @@
 import { getDb } from '../db/index.js';
+import { CertificateRow } from '../db/types.js';
 import { certificateAuthority } from '../services/certificateAuthority.js';
 import { auditService } from '../services/auditService.js';
 import logger from '../lib/logger.js';
@@ -20,16 +21,6 @@ const RENEWAL_THRESHOLD_DAYS = 14;
 
 let checkInterval: NodeJS.Timeout | null = null;
 let isRunning = false;
-
-interface CertificateRow {
-  id: string;
-  name: string;
-  type: string;
-  subject_cn: string;
-  not_after: string;
-  issued_to_server_id: string | null;
-  issued_to_deployment_id: string | null;
-}
 
 /**
  * Start the certificate renewal job.

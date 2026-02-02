@@ -6,7 +6,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../../db/index.js';
 import type { ServiceDefinition } from '@ownprem/shared';
-import type { ServiceRoute, ServiceRouteRow } from './proxyTypes.js';
+import type { ServiceRoute, ServiceRouteRowWithJoins } from './proxyTypes.js';
 import { TCP_PORT_RANGE_START, TCP_PORT_RANGE_END } from './proxyTypes.js';
 
 /**
@@ -161,7 +161,7 @@ export async function getActiveServiceRoutes(): Promise<ServiceRoute[]> {
     JOIN servers svr ON d.server_id = svr.id
     WHERE sr.active = TRUE
     ORDER BY sr.route_type, svc.service_name
-  `).all() as ServiceRouteRow[];
+  `).all() as ServiceRouteRowWithJoins[];
 
   return rows.map(row => ({
     id: row.id,
@@ -189,7 +189,7 @@ export async function getServiceRoute(serviceId: string): Promise<ServiceRoute |
     JOIN deployments d ON svc.deployment_id = d.id
     JOIN servers svr ON d.server_id = svr.id
     WHERE sr.service_id = ?
-  `).get(serviceId) as ServiceRouteRow | undefined;
+  `).get(serviceId) as ServiceRouteRowWithJoins | undefined;
 
   if (!row) return null;
 

@@ -1,4 +1,6 @@
 import { getDb } from '../db/index.js';
+import { AuditLogRow } from '../db/types.js';
+import { filter } from '../db/queryBuilder.js';
 import logger from '../lib/logger.js';
 
 /**
@@ -92,18 +94,6 @@ export interface AuditEntry {
   ipAddress?: string;
 }
 
-interface AuditLogRow {
-  id: number;
-  action: string;
-  resource_type: string;
-  resource_id: string | null;
-  user_id: string | null;
-  username: string | null;
-  details: string | null;
-  ip_address: string | null;
-  created_at: string;
-}
-
 class AuditService {
   /**
    * Log an audit event.
@@ -144,7 +134,7 @@ class AuditService {
     offset?: number;
   } = {}): {
     logs: Array<{
-      id: number;
+      id: string;
       action: AuditAction;
       resourceType: ResourceType;
       resourceId: string | null;
@@ -157,27 +147,14 @@ class AuditService {
     total: number;
   } {
     const db = getDb();
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (filters.action) {
-      conditions.push('action = ?');
-      params.push(filters.action);
-    }
-    if (filters.resourceType) {
-      conditions.push('resource_type = ?');
-      params.push(filters.resourceType);
-    }
-    if (filters.resourceId) {
-      conditions.push('resource_id = ?');
-      params.push(filters.resourceId);
-    }
-    if (filters.userId) {
-      conditions.push('user_id = ?');
-      params.push(filters.userId);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    // Build filter using FilterBuilder
+    const { whereClause, params } = filter()
+      .equals('action', filters.action)
+      .equals('resource_type', filters.resourceType)
+      .equals('resource_id', filters.resourceId)
+      .equals('user_id', filters.userId)
+      .build();
 
     // Get total count
     const countRow = db.prepare(`SELECT COUNT(*) as count FROM audit_log ${whereClause}`).get(...params) as { count: number };
@@ -202,7 +179,7 @@ class AuditService {
         username: row.username,
         details: row.details ? JSON.parse(row.details) : null,
         ipAddress: row.ip_address,
-        createdAt: new Date(row.created_at),
+        createdAt: new Date(row.timestamp),
       })),
       total: countRow.count,
     };

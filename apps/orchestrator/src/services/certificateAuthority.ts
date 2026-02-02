@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getDb } from '../db/index.js';
+import { CertificateRow } from '../db/types.js';
 import { secretsManager } from './secretsManager.js';
 import logger from '../lib/logger.js';
 
@@ -57,26 +58,6 @@ export interface CertificateInfo {
   revokedAt: Date | null;
   createdAt: Date;
   expiresInDays: number;
-}
-
-interface CertificateRow {
-  id: string;
-  ca_deployment_id: string | null;
-  name: string;
-  type: string;
-  subject_cn: string;
-  subject_sans: string | null;
-  cert_pem: string;
-  key_encrypted: string;
-  ca_cert_pem: string | null;
-  serial_number: string;
-  not_before: string;
-  not_after: string;
-  issued_to_server_id: string | null;
-  issued_to_deployment_id: string | null;
-  revoked_at: string | null;
-  revocation_reason: string | null;
-  created_at: string;
 }
 
 interface CADeploymentInfo {

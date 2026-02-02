@@ -4,36 +4,12 @@ import { randomUUID, createHash, randomBytes } from 'crypto';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
 import { getDb } from '../db/index.js';
+import { UserRow, GroupRow, UserGroupRow, RefreshTokenRow } from '../db/types.js';
 import { config } from '../config.js';
 import { authLogger } from '../lib/logger.js';
 
-interface UserRow {
-  id: string;
-  username: string;
-  password_hash: string;
-  is_system_admin: boolean;
-  totp_secret: string | null;
-  totp_enabled: boolean;
-  backup_codes: string | null;
-  created_at: string;
-  last_login_at: string | null;
-}
-
-export interface GroupRow {
-  id: string;
-  name: string;
-  description: string | null;
-  totp_required: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface UserGroupRow {
-  user_id: string;
-  group_id: string;
-  role: 'admin' | 'operator' | 'viewer';
-  created_at: string;
-}
+// Re-export for backwards compatibility
+export type { GroupRow, UserGroupRow } from '../db/types.js';
 
 export interface UserGroupMembership {
   groupId: string;
@@ -46,19 +22,6 @@ export interface TotpSetupResult {
   secret: string;
   qrCode: string;
   backupCodes: string[];
-}
-
-interface RefreshTokenRow {
-  id: string;
-  user_id: string;
-  token_hash: string;
-  expires_at: string;
-  created_at: string;
-  ip_address: string | null;
-  user_agent: string | null;
-  last_used_at: string | null;
-  family_id: string | null;
-  issued_at: string | null;
 }
 
 export interface SessionInfo {

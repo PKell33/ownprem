@@ -1,6 +1,14 @@
 import { Router, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/index.js';
+import {
+  MountRow,
+  ServerMountRow,
+  ServerMountWithDetailsRow,
+  rowToMount,
+  rowToServerMount,
+  rowToServerMountWithDetails,
+} from '../../db/types.js';
 import { createError, Errors, createTypedError } from '../middleware/error.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
@@ -9,7 +17,6 @@ import { secretsManager } from '../../services/secretsManager.js';
 import { sendMountCommand, isAgentConnected } from '../../websocket/agentHandler.js';
 import { apiLogger } from '../../lib/logger.js';
 import { ErrorCodes } from '@ownprem/shared';
-import type { Mount, ServerMount, ServerMountWithDetails, MountType, MountStatus } from '@ownprem/shared';
 
 const router = Router();
 
@@ -24,99 +31,6 @@ function canManageMounts(req: AuthenticatedRequest, res: Response, next: NextFun
     return;
   }
   res.status(403).json({ error: { code: ErrorCodes.FORBIDDEN, message: 'System admin permission required' } });
-}
-
-// ==================
-// Type definitions
-// ==================
-
-interface MountRow {
-  id: string;
-  name: string;
-  mount_type: string;
-  source: string;
-  default_options: string | null;
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ServerMountRow {
-  id: string;
-  server_id: string;
-  mount_id: string;
-  mount_point: string;
-  options: string | null;
-  purpose: string | null;
-  auto_mount: number;
-  status: string;
-  status_message: string | null;
-  last_checked: string | null;
-  usage_bytes: number | null;
-  total_bytes: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ServerMountWithDetailsRow extends ServerMountRow {
-  mount_name: string;
-  mount_type: string;
-  source: string;
-  default_options: string | null;
-  mount_description: string | null;
-  server_name: string;
-  has_credentials: number;
-}
-
-function rowToMount(row: MountRow, hasCredentials: boolean = false): Mount {
-  return {
-    id: row.id,
-    name: row.name,
-    mountType: row.mount_type as MountType,
-    source: row.source,
-    defaultOptions: row.default_options,
-    hasCredentials,
-    description: row.description,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
-
-function rowToServerMount(row: ServerMountRow): ServerMount {
-  return {
-    id: row.id,
-    serverId: row.server_id,
-    mountId: row.mount_id,
-    mountPoint: row.mount_point,
-    options: row.options,
-    purpose: row.purpose,
-    autoMount: Boolean(row.auto_mount),
-    status: row.status as MountStatus,
-    statusMessage: row.status_message,
-    lastChecked: row.last_checked ? new Date(row.last_checked) : null,
-    usageBytes: row.usage_bytes,
-    totalBytes: row.total_bytes,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
-
-function rowToServerMountWithDetails(row: ServerMountWithDetailsRow): ServerMountWithDetails {
-  return {
-    ...rowToServerMount(row),
-    mount: {
-      id: row.mount_id,
-      name: row.mount_name,
-      mountType: row.mount_type as MountType,
-      source: row.source,
-      defaultOptions: row.default_options,
-      hasCredentials: Boolean(row.has_credentials),
-      description: row.mount_description,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-    },
-    serverName: row.server_name,
-  };
 }
 
 // ==================

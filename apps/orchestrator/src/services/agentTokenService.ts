@@ -1,6 +1,7 @@
 import { randomBytes, createHash } from 'crypto';
 import { randomUUID } from 'crypto';
 import { getDb } from '../db/index.js';
+import { AgentTokenRow } from '../db/types.js';
 import { auditService } from './auditService.js';
 import logger from '../lib/logger.js';
 
@@ -11,16 +12,6 @@ export interface AgentToken {
   expiresAt: Date | null;
   createdAt: Date;
   lastUsedAt: Date | null;
-}
-
-interface AgentTokenRow {
-  id: string;
-  server_id: string;
-  token_hash: string;
-  name: string | null;
-  expires_at: string | null;
-  created_at: string;
-  last_used_at: string | null;
 }
 
 /**

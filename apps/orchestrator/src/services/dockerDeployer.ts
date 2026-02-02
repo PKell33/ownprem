@@ -8,23 +8,12 @@
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/index.js';
+import { DeploymentRow } from '../db/types.js';
 import logger from '../lib/logger.js';
 import { appStoreService, type AppDefinition } from './appStoreService.js';
 import { sendCommandAndWait, isAgentConnected } from '../websocket/agentHandler.js';
 import { secretsManager } from './secretsManager.js';
 import type { CommandResult, DockerDeployResult } from '@ownprem/shared';
-
-interface DeploymentRow {
-  id: string;
-  server_id: string;
-  app_name: string;
-  version: string;
-  config: string;
-  status: string;
-  status_message: string | null;
-  installed_at: string;
-  updated_at: string;
-}
 
 interface ComposeService {
   image?: string;

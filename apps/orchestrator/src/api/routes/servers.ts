@@ -1,13 +1,13 @@
 import { Router, Response, NextFunction } from 'express';
 import { randomBytes } from 'crypto';
 import { getDb } from '../../db/index.js';
+import { ServerRow, rowToServer } from '../../db/types.js';
 import { Errors, createTypedError } from '../middleware/error.js';
 import { validateBody, validateParams, schemas } from '../middleware/validate.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { hashToken } from '../../websocket/agentHandler.js';
 import { parsePaginationParams, paginateOrReturnAll } from '../../lib/pagination.js';
 import { ErrorCodes } from '@ownprem/shared';
-import type { Server, ServerMetrics, NetworkInfo } from '@ownprem/shared';
 
 // Helper: Check if user can manage servers (system admin only for now)
 function canManageServers(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
@@ -23,36 +23,6 @@ function canManageServers(req: AuthenticatedRequest, res: Response, next: NextFu
 }
 
 const router = Router();
-
-interface ServerRow {
-  id: string;
-  name: string;
-  host: string | null;
-  is_core: number;
-  agent_status: string;
-  auth_token: string | null;
-  metrics: string | null;
-  network_info: string | null;
-  last_seen: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-function rowToServer(row: ServerRow): Server {
-  return {
-    id: row.id,
-    name: row.name,
-    host: row.host,
-    isCore: Boolean(row.is_core),
-    agentStatus: row.agent_status as Server['agentStatus'],
-    authToken: row.auth_token,
-    metrics: row.metrics ? JSON.parse(row.metrics) as ServerMetrics : undefined,
-    networkInfo: row.network_info ? JSON.parse(row.network_info) as NetworkInfo : undefined,
-    lastSeen: row.last_seen ? new Date(row.last_seen) : null,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
 
 // GET /api/servers - List all servers
 router.get('/', requireAuth, (req, res) => {
