@@ -185,14 +185,15 @@ class RuntipiStoreService extends BaseStoreService<RuntipiAppDefinition> {
     };
   }
 
-  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<void> {
+  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<boolean> {
     const { iconPath } = rawData as RuntipiRawData;
-    if (!iconPath || !existsSync(iconPath)) return;
+    if (!iconPath || !existsSync(iconPath)) return false;
 
     const iconsDir = await this.ensureIconDir(registryId);
     const iconContent = await readFile(iconPath);
     const destPath = join(iconsDir, `${appId}.jpg`);
     await writeFile(destPath, iconContent);
+    return true;
   }
 }
 

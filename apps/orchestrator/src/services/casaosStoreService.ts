@@ -207,17 +207,17 @@ class CasaOSStoreService extends BaseStoreService<CasaOSAppDefinition> {
     };
   }
 
-  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<void> {
+  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<boolean> {
     const { compose } = rawData as CasaOSRawData;
     const casaos = compose['x-casaos'] as CasaOSMetadata | undefined;
 
     const iconUrl = casaos?.icon;
-    if (!iconUrl || !iconUrl.startsWith('http')) return;
+    if (!iconUrl || !iconUrl.startsWith('http')) return false;
 
     const iconsDir = await this.ensureIconDir(registryId);
 
     const response = await fetch(iconUrl);
-    if (!response.ok) return;
+    if (!response.ok) return false;
 
     const contentType = response.headers.get('content-type') || '';
     const ext = contentType.includes('svg') ? 'svg' : contentType.includes('png') ? 'png' : 'png';
@@ -225,6 +225,7 @@ class CasaOSStoreService extends BaseStoreService<CasaOSAppDefinition> {
 
     const buffer = Buffer.from(await response.arrayBuffer());
     await writeFile(iconPath, buffer);
+    return true;
   }
 }
 

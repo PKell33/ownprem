@@ -176,9 +176,9 @@ class Start9StoreService extends BaseStoreService<Start9AppDefinition> {
     };
   }
 
-  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<void> {
+  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<boolean> {
     const app = rawData as RegistryApp;
-    if (!app.icon) return;
+    if (!app.icon) return false;
 
     const iconsDir = await this.ensureIconDir(registryId);
 
@@ -195,6 +195,7 @@ class Start9StoreService extends BaseStoreService<Start9AppDefinition> {
     const iconPath = join(iconsDir, `${appId}.${ext}`);
     await writeFile(iconPath, iconBuffer);
     this.log.debug({ appId, registry: registryId, iconPath, format: ext }, 'Saved icon');
+    return true;
   }
 
   // ==================== Start9-Specific Methods ====================

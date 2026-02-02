@@ -177,8 +177,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
    * @param appId The app ID
    * @param registryId The registry ID
    * @param rawData The raw data (may contain icon URL or data)
+   * @returns true if icon was downloaded, false if missing/failed
    */
-  protected abstract downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<void>;
+  protected abstract downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<boolean>;
 
   /**
    * Validate a registry URL
@@ -523,9 +524,13 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
             ).get(fetchedApp.id, registry.id, this.storeName) as { id: string; data: string } | undefined;
 
             // Download icon (store-specific implementation)
-            await this.downloadIcon(fetchedApp.id, registry.id, fetchedApp.data).catch(err => {
+            const iconDownloaded = await this.downloadIcon(fetchedApp.id, registry.id, fetchedApp.data).catch(err => {
               this.log.warn({ store: this.storeName, appId: fetchedApp.id, error: err }, 'Failed to download icon');
+              return false;
             });
+            if (iconDownloaded === false) {
+              errors.push(`Icon missing: ${fetchedApp.id}`);
+            }
 
             // Transform and cache the app
             const app = this.transformApp(fetchedApp.id, registry.id, fetchedApp.data);

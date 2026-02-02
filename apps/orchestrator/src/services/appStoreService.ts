@@ -160,18 +160,19 @@ class AppStoreService extends BaseStoreService<AppDefinition> {
     };
   }
 
-  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<void> {
+  protected async downloadIcon(appId: string, registryId: string, rawData: unknown): Promise<boolean> {
     const { galleryBase } = rawData as UmbrelRawData;
     const iconUrl = `${galleryBase}/${appId}/icon.svg`;
 
     const iconsDir = await this.ensureIconDir(registryId);
 
     const response = await fetch(iconUrl);
-    if (!response.ok) return;
+    if (!response.ok) return false;
 
     const iconData = await response.arrayBuffer();
     const iconPath = join(iconsDir, `${appId}.svg`);
     await writeFile(iconPath, Buffer.from(iconData));
+    return true;
   }
 
   // ==================== Umbrel-Specific Overrides ====================
