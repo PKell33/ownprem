@@ -20,7 +20,96 @@ export function useServer(id: string) {
   });
 }
 
-// TODO: Umbrel App Store hooks will be added here
+// Umbrel App Store hooks
+export function useUmbrelApps(category?: string) {
+  return useQuery({
+    queryKey: ['umbrelApps', category],
+    queryFn: () => api.getApps(category),
+    staleTime: 5 * 60 * 1000, // 5 minutes - app catalog is relatively stable
+  });
+}
+
+export function useUmbrelApp(id: string) {
+  return useQuery({
+    queryKey: ['umbrelApps', id],
+    queryFn: () => api.getApp(id),
+    enabled: !!id,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUmbrelCategories() {
+  return useQuery({
+    queryKey: ['umbrelCategories'],
+    queryFn: api.getAppCategories,
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function useUmbrelSyncStatus() {
+  return useQuery({
+    queryKey: ['umbrelSyncStatus'],
+    queryFn: api.getAppSyncStatus,
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function useSyncUmbrelApps() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.syncApps,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['umbrelApps'] });
+      queryClient.invalidateQueries({ queryKey: ['umbrelCategories'] });
+      queryClient.invalidateQueries({ queryKey: ['umbrelSyncStatus'] });
+    },
+  });
+}
+
+// Start9 App Store hooks
+export function useStart9Apps() {
+  return useQuery({
+    queryKey: ['start9Apps'],
+    queryFn: api.getStart9Apps,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export function useStart9App(id: string) {
+  return useQuery({
+    queryKey: ['start9Apps', id],
+    queryFn: () => api.getStart9App(id),
+    enabled: !!id,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useStart9SyncStatus() {
+  return useQuery({
+    queryKey: ['start9SyncStatus'],
+    queryFn: api.getStart9SyncStatus,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useSyncStart9Apps() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.syncStart9Apps,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['start9Apps'] });
+      queryClient.invalidateQueries({ queryKey: ['start9SyncStatus'] });
+    },
+  });
+}
+
+export function useLoadStart9Image() {
+  return useMutation({
+    mutationFn: (appId: string) => api.loadStart9Image(appId),
+  });
+}
 
 // System status
 export function useSystemStatus() {

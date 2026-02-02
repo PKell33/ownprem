@@ -4,11 +4,10 @@ import type { DataDirectory } from './app.js';
 
 export interface AgentCommand {
   id: string;
-  action: 'install' | 'configure' | 'start' | 'stop' | 'restart' | 'uninstall' | 'getLogs'
-        | 'streamLogs' | 'stopStreamLogs'
-        | 'mountStorage' | 'unmountStorage' | 'checkMount'
-        | 'configureKeepalived' | 'checkKeepalived';
-  appName: string;
+  action: 'mountStorage' | 'unmountStorage' | 'checkMount'
+        | 'docker:deploy' | 'docker:start' | 'docker:stop' | 'docker:remove'
+        | 'docker:restart' | 'docker:logs' | 'docker:status';
+  appName?: string;
   payload?: CommandPayload;
 }
 
@@ -31,8 +30,14 @@ export interface CommandPayload {
   metadata?: AppMetadata;          // App metadata written to .ownprem.json
   logOptions?: LogRequestPayload;
   mountOptions?: MountCommandPayload;
-  keepalivedConfig?: string;       // Keepalived configuration content
-  enabled?: boolean;               // Enable/disable keepalived
+  // Docker-specific options
+  docker?: DockerCommandPayload;
+}
+
+export interface DockerCommandPayload {
+  appId: string;
+  composeYaml?: string;           // For docker:deploy
+  lines?: number;                 // For docker:logs (default 100)
 }
 
 export interface LogRequestPayload {
@@ -64,7 +69,21 @@ export interface CommandResult {
   status: 'success' | 'error';
   message?: string;
   duration?: number;
-  data?: MountCheckResult | KeepalivedStatus;
+  data?: MountCheckResult | DockerDeployResult | DockerStatusResult | DockerLogsResult;
+}
+
+export interface DockerDeployResult {
+  success: boolean;
+  containers: string[];
+  error?: string;
+}
+
+export interface DockerStatusResult {
+  containers: DockerContainerStatus[];
+}
+
+export interface DockerLogsResult {
+  logs: string;
 }
 
 export interface CommandAck {
@@ -78,6 +97,23 @@ export interface AgentStatusReport {
   metrics: ServerMetrics;
   networkInfo?: NetworkInfo;
   apps: AppStatus[];
+  docker?: DockerInfo;
+}
+
+export interface DockerInfo {
+  available: boolean;
+  version?: string;
+  error?: string;
+  containers?: DockerContainerStatus[];
+}
+
+export interface DockerContainerStatus {
+  appId: string;
+  name: string;
+  service: string;
+  state: string;
+  status: string;
+  health?: string;
 }
 
 export interface AppStatus {

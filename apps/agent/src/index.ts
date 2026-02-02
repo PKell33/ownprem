@@ -1,7 +1,8 @@
-import type { AgentCommand, AgentStatusReport } from '@ownprem/shared';
+import type { AgentCommand, AgentStatusReport, DockerContainerStatus } from '@ownprem/shared';
 import { Connection } from './connection.js';
 import { Reporter } from './reporter.js';
 import { privilegedClient } from './privilegedClient.js';
+import { dockerExecutor } from './dockerExecutor.js';
 import logger from './lib/logger.js';
 
 const STATUS_REPORT_INTERVAL = 10000; // 10 seconds
@@ -147,11 +148,96 @@ class Agent {
           this.activeCommandCount--;
           return; // Don't send normal command result
         }
-        // TODO: Add Docker commands here
-        // case 'docker:deploy':
-        // case 'docker:start':
-        // case 'docker:stop':
-        // case 'docker:logs':
+
+        // Docker commands
+        case 'docker:deploy': {
+          if (!cmd.payload?.docker?.appId || !cmd.payload?.docker?.composeYaml) {
+            throw new Error('appId and composeYaml required for docker:deploy');
+          }
+          const deployResult = await dockerExecutor.deploy(
+            cmd.payload.docker.composeYaml,
+            cmd.payload.docker.appId
+          );
+          this.connection.sendCommandResult({
+            commandId: cmd.id,
+            status: deployResult.success ? 'success' : 'error',
+            duration: Date.now() - start,
+            data: deployResult,
+            message: deployResult.error,
+          });
+          this.activeCommandCount--;
+          return;
+        }
+        case 'docker:start': {
+          if (!cmd.payload?.docker?.appId) {
+            throw new Error('appId required for docker:start');
+          }
+          await dockerExecutor.start(cmd.payload.docker.appId);
+          break;
+        }
+        case 'docker:stop': {
+          if (!cmd.payload?.docker?.appId) {
+            throw new Error('appId required for docker:stop');
+          }
+          await dockerExecutor.stop(cmd.payload.docker.appId);
+          break;
+        }
+        case 'docker:restart': {
+          if (!cmd.payload?.docker?.appId) {
+            throw new Error('appId required for docker:restart');
+          }
+          await dockerExecutor.restart(cmd.payload.docker.appId);
+          break;
+        }
+        case 'docker:remove': {
+          if (!cmd.payload?.docker?.appId) {
+            throw new Error('appId required for docker:remove');
+          }
+          await dockerExecutor.remove(cmd.payload.docker.appId);
+          break;
+        }
+        case 'docker:logs': {
+          if (!cmd.payload?.docker?.appId) {
+            throw new Error('appId required for docker:logs');
+          }
+          const logs = await dockerExecutor.logs(
+            cmd.payload.docker.appId,
+            cmd.payload.docker.lines || 100
+          );
+          this.connection.sendCommandResult({
+            commandId: cmd.id,
+            status: 'success',
+            duration: Date.now() - start,
+            data: { logs },
+          });
+          this.activeCommandCount--;
+          return;
+        }
+        case 'docker:status': {
+          if (!cmd.payload?.docker?.appId) {
+            throw new Error('appId required for docker:status');
+          }
+          const appId = cmd.payload.docker.appId;
+          const rawContainers = await dockerExecutor.status(appId);
+          // Add appId to each container for the shared type
+          const containers = rawContainers.map(c => ({
+            appId,
+            name: c.name,
+            service: c.service,
+            state: c.state,
+            status: c.status,
+            health: c.health,
+          }));
+          this.connection.sendCommandResult({
+            commandId: cmd.id,
+            status: 'success',
+            duration: Date.now() - start,
+            data: { containers },
+          });
+          this.activeCommandCount--;
+          return;
+        }
+
         default:
           throw new Error(`Unknown action: ${cmd.action}`);
       }
@@ -220,12 +306,37 @@ class Agent {
 
   private async reportStatus(): Promise<void> {
     try {
+      // Get Docker info
+      const dockerInfo = await dockerExecutor.checkDocker();
+      let dockerContainers: DockerContainerStatus[] = [];
+
+      if (dockerInfo.available) {
+        // Get all OwnPrem-managed Docker apps
+        const apps = await dockerExecutor.listApps();
+        dockerContainers = apps.flatMap(app =>
+          app.status.map(container => ({
+            appId: app.appId,
+            name: container.name,
+            service: container.service,
+            state: container.state,
+            status: container.status,
+            health: container.health,
+          }))
+        );
+      }
+
       const report: AgentStatusReport = {
         serverId: this.serverId,
         timestamp: new Date(),
         metrics: await this.reporter.getMetrics(),
         networkInfo: this.reporter.getNetworkInfo(),
-        apps: [], // No native apps anymore - Docker containers will be reported differently
+        apps: [], // Legacy field - Docker apps reported via docker field
+        docker: {
+          available: dockerInfo.available,
+          version: dockerInfo.version,
+          error: dockerInfo.error,
+          containers: dockerContainers,
+        },
       };
 
       this.connection.sendStatus(report);
