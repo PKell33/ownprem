@@ -11,6 +11,7 @@ import { Errors } from '../middleware/error.js';
 import { casaosStoreService } from '../../services/casaosStoreService.js';
 import { config } from '../../config.js';
 import { z } from 'zod';
+import { proxyImage, getGalleryUrls } from '../utils/imageProxy.js';
 
 const router = Router();
 
@@ -74,6 +75,34 @@ iconRouter.get('/:id/icon', validateParams(z.object({ id: z.string().min(1).max(
     }
 
     res.status(404).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/casaos/apps/:id/gallery/:index - Proxy gallery images to avoid CORS issues
+iconRouter.get('/:id/gallery/:index', validateParams(z.object({
+  id: z.string().min(1).max(100),
+  index: z.string().regex(/^\d+$/),
+})), async (req, res, next) => {
+  try {
+    const { id, index } = req.params;
+    const app = await casaosStoreService.getApp(id);
+
+    if (!app) {
+      res.status(404).end();
+      return;
+    }
+
+    const gallery = getGalleryUrls(app as unknown as Record<string, unknown>);
+    const idx = parseInt(index, 10);
+
+    if (idx < 0 || idx >= gallery.length) {
+      res.status(404).end();
+      return;
+    }
+
+    await proxyImage(gallery[idx], res);
   } catch (err) {
     next(err);
   }

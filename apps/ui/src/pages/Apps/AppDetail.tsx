@@ -127,12 +127,23 @@ export default function AppDetail() {
   const hasReleaseNotes = appReleaseNotes.trim().length > 0;
   const hasResources = !!appWebsite || !!appRepo || !!appSupport;
 
-  // Get gallery image URL - use proxy for Umbrel to avoid CORS issues
+  // Get gallery image URL - use proxy to avoid CORS issues
   const getGalleryUrl = (index: number): string => {
-    if (storeType === 'umbrel' && appId) {
-      return `/api/apps/${encodeURIComponent(appId)}/gallery/${index}`;
+    if (!appId) return appGallery[index] || '';
+
+    // Use store-specific proxy endpoints
+    switch (storeType) {
+      case 'umbrel':
+        return `/api/apps/${encodeURIComponent(appId)}/gallery/${index}`;
+      case 'start9':
+        return `/api/start9/apps/${encodeURIComponent(appId)}/gallery/${index}`;
+      case 'casaos':
+        return `/api/casaos/apps/${encodeURIComponent(appId)}/gallery/${index}`;
+      case 'runtipi':
+        return `/api/runtipi/apps/${encodeURIComponent(appId)}/gallery/${index}`;
+      default:
+        return appGallery[index] || '';
     }
-    return appGallery[index] || '';
   };
 
   const nextImage = () => {

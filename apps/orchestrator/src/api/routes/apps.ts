@@ -11,6 +11,7 @@ import { Errors } from '../middleware/error.js';
 import { appStoreService } from '../../services/appStoreService.js';
 import { config } from '../../config.js';
 import { z } from 'zod';
+import { proxyImage, getGalleryUrls } from '../utils/imageProxy.js';
 
 const router = Router();
 
@@ -66,37 +67,19 @@ iconRouter.get('/:id/gallery/:index', validateParams(z.object({
     const app = await appStoreService.getApp(id);
 
     if (!app) {
-      res.status(404).json({ error: { code: 'APP_NOT_FOUND', message: `App not found: ${id}` } });
+      res.status(404).end();
       return;
     }
 
-    const gallery = app.gallery || [];
+    const gallery = getGalleryUrls(app as unknown as Record<string, unknown>);
     const idx = parseInt(index, 10);
 
     if (idx < 0 || idx >= gallery.length) {
-      res.status(404).json({ error: { code: 'IMAGE_NOT_FOUND', message: `Gallery image ${idx} not found` } });
+      res.status(404).end();
       return;
     }
 
-    const imageUrl = gallery[idx];
-
-    // Fetch the image from the external URL
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      // Return 404 for missing images (not 502) - many apps don't have gallery images
-      const status = response.status === 404 ? 404 : 502;
-      res.status(status).end();
-      return;
-    }
-
-    // Forward content type and cache headers
-    const contentType = response.headers.get('content-type') || 'image/png';
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-
-    // Stream the response
-    const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    await proxyImage(gallery[idx], res);
   } catch (err) {
     next(err);
   }
