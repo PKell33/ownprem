@@ -1,6 +1,10 @@
 /**
  * Base class for app store services
  * Provides common functionality for registry management, app caching, and syncing
+ *
+ * Uses unified tables:
+ * - store_registries: All registries with store_type column
+ * - store_app_cache: All cached apps with store_type column
  */
 
 import { mkdir, writeFile } from 'fs/promises';
@@ -9,6 +13,13 @@ import { join } from 'path';
 import { getDb } from '../db/index.js';
 import logger from '../lib/logger.js';
 import { config } from '../config.js';
+
+/** Unified table names */
+const REGISTRIES_TABLE = 'store_registries';
+const APP_CACHE_TABLE = 'store_app_cache';
+
+/** Track if unified tables have been created */
+let tablesInitialized = false;
 
 /**
  * Common registry interface used by all stores
@@ -64,9 +75,67 @@ export interface DefaultRegistry {
  */
 interface AppCacheRow {
   id: string;
+  store_type: string;
   registry: string;
   data: string;
   updated_at: string;
+}
+
+/**
+ * Database row for registry
+ */
+interface RegistryRow {
+  id: string;
+  store_type: string;
+  name: string;
+  url: string;
+  enabled: number;
+  last_sync: string | null;
+  created_at: string;
+}
+
+/**
+ * Initialize unified tables (called once across all store services)
+ */
+function initializeUnifiedTables(): void {
+  if (tablesInitialized) return;
+
+  const db = getDb();
+
+  // Create unified registries table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ${REGISTRIES_TABLE} (
+      id TEXT NOT NULL,
+      store_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_sync TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id, store_type),
+      UNIQUE (url, store_type)
+    )
+  `);
+
+  // Create unified app cache table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ${APP_CACHE_TABLE} (
+      id TEXT NOT NULL,
+      store_type TEXT NOT NULL,
+      registry TEXT NOT NULL,
+      data TEXT NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id, store_type, registry)
+    )
+  `);
+
+  // Create indexes for common queries
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_store_registries_type ON ${REGISTRIES_TABLE}(store_type)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_store_app_cache_type ON ${APP_CACHE_TABLE}(store_type)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_store_app_cache_registry ON ${APP_CACHE_TABLE}(store_type, registry)`);
+
+  tablesInitialized = true;
+  logger.info('Unified store tables initialized');
 }
 
 /**
@@ -118,16 +187,6 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
    */
   protected abstract validateRegistryUrl(url: string): void;
 
-  // ==================== Database Table Names ====================
-
-  protected get registriesTable(): string {
-    return `${this.storeName}_registries`;
-  }
-
-  protected get appCacheTable(): string {
-    return `${this.storeName}_app_cache`;
-  }
-
   // ==================== Initialization ====================
 
   /**
@@ -136,37 +195,22 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
+    // Initialize unified tables (only happens once)
+    initializeUnifiedTables();
+
     const db = getDb();
 
-    // Create registries table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS ${this.registriesTable} (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        url TEXT NOT NULL UNIQUE,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        last_sync TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+    // Seed default registries if none exist for this store
+    const registryCount = db.prepare(
+      `SELECT COUNT(*) as count FROM ${REGISTRIES_TABLE} WHERE store_type = ?`
+    ).get(this.storeName) as { count: number };
 
-    // Create app cache table with composite primary key
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS ${this.appCacheTable} (
-        id TEXT NOT NULL,
-        registry TEXT NOT NULL,
-        data TEXT NOT NULL,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (id, registry)
-      )
-    `);
-
-    // Seed default registries if none exist
-    const registryCount = db.prepare(`SELECT COUNT(*) as count FROM ${this.registriesTable}`).get() as { count: number };
     if (registryCount.count === 0) {
-      const insertStmt = db.prepare(`INSERT INTO ${this.registriesTable} (id, name, url, enabled) VALUES (?, ?, ?, 1)`);
+      const insertStmt = db.prepare(
+        `INSERT INTO ${REGISTRIES_TABLE} (id, store_type, name, url, enabled) VALUES (?, ?, ?, ?, 1)`
+      );
       for (const reg of this.defaultRegistries) {
-        insertStmt.run(reg.id, reg.name, reg.url);
+        insertStmt.run(reg.id, this.storeName, reg.name, reg.url);
       }
       this.log.info({ store: this.storeName, count: this.defaultRegistries.length }, 'Seeded default registries');
     }
@@ -186,18 +230,11 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
 
     const rows = db.prepare(`
       SELECT r.*,
-        (SELECT COUNT(*) FROM ${this.appCacheTable} WHERE registry = r.id) as app_count
-      FROM ${this.registriesTable} r
+        (SELECT COUNT(*) FROM ${APP_CACHE_TABLE} WHERE store_type = r.store_type AND registry = r.id) as app_count
+      FROM ${REGISTRIES_TABLE} r
+      WHERE r.store_type = ?
       ORDER BY r.created_at ASC
-    `).all() as Array<{
-      id: string;
-      name: string;
-      url: string;
-      enabled: number;
-      last_sync: string | null;
-      created_at: string;
-      app_count: number;
-    }>;
+    `).all(this.storeName) as Array<RegistryRow & { app_count: number }>;
 
     return rows.map(row => ({
       id: row.id,
@@ -219,18 +256,10 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
 
     const row = db.prepare(`
       SELECT r.*,
-        (SELECT COUNT(*) FROM ${this.appCacheTable} WHERE registry = r.id) as app_count
-      FROM ${this.registriesTable} r
-      WHERE r.id = ?
-    `).get(id) as {
-      id: string;
-      name: string;
-      url: string;
-      enabled: number;
-      last_sync: string | null;
-      created_at: string;
-      app_count: number;
-    } | undefined;
+        (SELECT COUNT(*) FROM ${APP_CACHE_TABLE} WHERE store_type = r.store_type AND registry = r.id) as app_count
+      FROM ${REGISTRIES_TABLE} r
+      WHERE r.id = ? AND r.store_type = ?
+    `).get(id, this.storeName) as (RegistryRow & { app_count: number }) | undefined;
 
     if (!row) return null;
 
@@ -255,20 +284,25 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
     // Validate URL
     this.validateRegistryUrl(url);
 
-    // Check for duplicate URL
-    const existingUrl = db.prepare(`SELECT id FROM ${this.registriesTable} WHERE url = ?`).get(url);
+    // Check for duplicate URL within this store
+    const existingUrl = db.prepare(
+      `SELECT id FROM ${REGISTRIES_TABLE} WHERE url = ? AND store_type = ?`
+    ).get(url, this.storeName);
     if (existingUrl) {
       throw new Error('A registry with this URL already exists');
     }
 
-    // Check for duplicate ID
-    const existingId = db.prepare(`SELECT id FROM ${this.registriesTable} WHERE id = ?`).get(id);
+    // Check for duplicate ID within this store
+    const existingId = db.prepare(
+      `SELECT id FROM ${REGISTRIES_TABLE} WHERE id = ? AND store_type = ?`
+    ).get(id, this.storeName);
     if (existingId) {
       throw new Error('A registry with this ID already exists');
     }
 
-    db.prepare(`INSERT INTO ${this.registriesTable} (id, name, url, enabled) VALUES (?, ?, ?, 1)`)
-      .run(id, name, url);
+    db.prepare(
+      `INSERT INTO ${REGISTRIES_TABLE} (id, store_type, name, url, enabled) VALUES (?, ?, ?, ?, 1)`
+    ).run(id, this.storeName, name, url);
 
     this.log.info({ store: this.storeName, id, name, url }, 'Added registry');
 
@@ -303,7 +337,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
     if (updates.url !== undefined) {
       this.validateRegistryUrl(updates.url);
 
-      const duplicate = db.prepare(`SELECT id FROM ${this.registriesTable} WHERE url = ? AND id != ?`).get(updates.url, id);
+      const duplicate = db.prepare(
+        `SELECT id FROM ${REGISTRIES_TABLE} WHERE url = ? AND id != ? AND store_type = ?`
+      ).get(updates.url, id, this.storeName);
       if (duplicate) {
         throw new Error('A registry with this URL already exists');
       }
@@ -321,8 +357,10 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
       return existing;
     }
 
-    values.push(id);
-    db.prepare(`UPDATE ${this.registriesTable} SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    values.push(id, this.storeName);
+    db.prepare(
+      `UPDATE ${REGISTRIES_TABLE} SET ${fields.join(', ')} WHERE id = ? AND store_type = ?`
+    ).run(...values);
 
     this.log.info({ store: this.storeName, id, updates }, 'Updated registry');
 
@@ -336,14 +374,20 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
     await this.initialize();
     const db = getDb();
 
-    const existing = db.prepare(`SELECT id FROM ${this.registriesTable} WHERE id = ?`).get(id);
+    const existing = db.prepare(
+      `SELECT id FROM ${REGISTRIES_TABLE} WHERE id = ? AND store_type = ?`
+    ).get(id, this.storeName);
     if (!existing) return false;
 
     // Delete cached apps for this registry
-    db.prepare(`DELETE FROM ${this.appCacheTable} WHERE registry = ?`).run(id);
+    db.prepare(
+      `DELETE FROM ${APP_CACHE_TABLE} WHERE registry = ? AND store_type = ?`
+    ).run(id, this.storeName);
 
     // Delete the registry
-    db.prepare(`DELETE FROM ${this.registriesTable} WHERE id = ?`).run(id);
+    db.prepare(
+      `DELETE FROM ${REGISTRIES_TABLE} WHERE id = ? AND store_type = ?`
+    ).run(id, this.storeName);
 
     this.log.info({ store: this.storeName, id }, 'Removed registry');
 
@@ -359,7 +403,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
     await this.initialize();
     const db = getDb();
 
-    const rows = db.prepare(`SELECT * FROM ${this.appCacheTable}`).all() as AppCacheRow[];
+    const rows = db.prepare(
+      `SELECT * FROM ${APP_CACHE_TABLE} WHERE store_type = ?`
+    ).all(this.storeName) as AppCacheRow[];
     return rows.map(row => this.rowToApp(row));
   }
 
@@ -374,9 +420,13 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
 
     let row: AppCacheRow | undefined;
     if (registryId) {
-      row = db.prepare(`SELECT * FROM ${this.appCacheTable} WHERE id = ? AND registry = ?`).get(id, registryId) as AppCacheRow | undefined;
+      row = db.prepare(
+        `SELECT * FROM ${APP_CACHE_TABLE} WHERE id = ? AND registry = ? AND store_type = ?`
+      ).get(id, registryId, this.storeName) as AppCacheRow | undefined;
     } else {
-      row = db.prepare(`SELECT * FROM ${this.appCacheTable} WHERE id = ?`).get(id) as AppCacheRow | undefined;
+      row = db.prepare(
+        `SELECT * FROM ${APP_CACHE_TABLE} WHERE id = ? AND store_type = ?`
+      ).get(id, this.storeName) as AppCacheRow | undefined;
     }
 
     if (!row) return null;
@@ -390,7 +440,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
     await this.initialize();
     const db = getDb();
 
-    const result = db.prepare(`SELECT COUNT(*) as count FROM ${this.appCacheTable}`).get() as { count: number };
+    const result = db.prepare(
+      `SELECT COUNT(*) as count FROM ${APP_CACHE_TABLE} WHERE store_type = ?`
+    ).get(this.storeName) as { count: number };
     return result.count;
   }
 
@@ -466,8 +518,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
         for (const fetchedApp of fetchedApps) {
           try {
             // Check if app exists and get its version
-            const existing = db.prepare(`SELECT id, data FROM ${this.appCacheTable} WHERE id = ? AND registry = ?`)
-              .get(fetchedApp.id, registry.id) as { id: string; data: string } | undefined;
+            const existing = db.prepare(
+              `SELECT id, data FROM ${APP_CACHE_TABLE} WHERE id = ? AND registry = ? AND store_type = ?`
+            ).get(fetchedApp.id, registry.id, this.storeName) as { id: string; data: string } | undefined;
 
             // Download icon (store-specific implementation)
             await this.downloadIcon(fetchedApp.id, registry.id, fetchedApp.data).catch(err => {
@@ -478,9 +531,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
             const app = this.transformApp(fetchedApp.id, registry.id, fetchedApp.data);
 
             db.prepare(`
-              INSERT OR REPLACE INTO ${this.appCacheTable} (id, registry, data, updated_at)
-              VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            `).run(fetchedApp.id, registry.id, JSON.stringify(app));
+              INSERT OR REPLACE INTO ${APP_CACHE_TABLE} (id, store_type, registry, data, updated_at)
+              VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `).run(fetchedApp.id, this.storeName, registry.id, JSON.stringify(app));
 
             syncedAppIds.get(registry.id)!.add(fetchedApp.id);
 
@@ -500,7 +553,9 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
         }
 
         // Update registry last_sync time
-        db.prepare(`UPDATE ${this.registriesTable} SET last_sync = CURRENT_TIMESTAMP WHERE id = ?`).run(registry.id);
+        db.prepare(
+          `UPDATE ${REGISTRIES_TABLE} SET last_sync = CURRENT_TIMESTAMP WHERE id = ? AND store_type = ?`
+        ).run(registry.id, this.storeName);
 
       } catch (err) {
         const msg = `Failed to sync ${registry.name}: ${err instanceof Error ? err.message : String(err)}`;
@@ -512,11 +567,15 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
     // Remove apps no longer in synced registries
     for (const registry of registriesToSync) {
       const syncedIds = syncedAppIds.get(registry.id)!;
-      const cachedApps = db.prepare(`SELECT id FROM ${this.appCacheTable} WHERE registry = ?`).all(registry.id) as { id: string }[];
+      const cachedApps = db.prepare(
+        `SELECT id FROM ${APP_CACHE_TABLE} WHERE registry = ? AND store_type = ?`
+      ).all(registry.id, this.storeName) as { id: string }[];
 
       for (const cached of cachedApps) {
         if (!syncedIds.has(cached.id)) {
-          db.prepare(`DELETE FROM ${this.appCacheTable} WHERE id = ? AND registry = ?`).run(cached.id, registry.id);
+          db.prepare(
+            `DELETE FROM ${APP_CACHE_TABLE} WHERE id = ? AND registry = ? AND store_type = ?`
+          ).run(cached.id, registry.id, this.storeName);
           removed++;
         }
       }

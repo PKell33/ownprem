@@ -268,6 +268,37 @@ function runMigrations(database: Database.Database): void {
     recordMigration(database, 8, 'add_cascade_to_services_server_id');
     dbLogger.info('Migration 8: Completed adding ON DELETE CASCADE to services.server_id');
   }
+
+  // Migration 9: Consolidate app store tables into unified store_registries and store_app_cache
+  // Old tables: app_cache, umbrel_registries, start9_*, casaos_*, runtipi_*, app_sources
+  // New tables: store_registries, store_app_cache (created by BaseStoreService)
+  if (!isMigrationApplied(database, 9)) {
+    const oldTables = [
+      'app_cache',
+      'umbrel_registries',
+      'start9_app_cache',
+      'start9_registries',
+      'casaos_app_cache',
+      'casaos_registries',
+      'runtipi_app_cache',
+      'runtipi_registries',
+      'app_sources',
+    ];
+
+    for (const table of oldTables) {
+      // Check if table exists before dropping
+      const exists = database.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+      ).get(table);
+      if (exists) {
+        database.exec(`DROP TABLE ${table}`);
+        dbLogger.info({ table }, 'Dropped old store table');
+      }
+    }
+
+    recordMigration(database, 9, 'consolidate_store_tables');
+    dbLogger.info('Migration 9: Consolidated app store tables (old tables dropped, new unified tables created on first use)');
+  }
 }
 
 export function closeDb(): void {
