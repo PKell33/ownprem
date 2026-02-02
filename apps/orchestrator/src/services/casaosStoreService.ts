@@ -196,7 +196,7 @@ class CasaOSStoreService extends BaseStoreService<CasaOSAppDefinition> {
       description: casaos.description?.en_us || '',
       category: casaos.category || 'Utilities',
       developer: casaos.developer || casaos.author || 'Unknown',
-      icon: casaos.icon || this.getIconUrl(appDir.toLowerCase(), registryId),
+      icon: this.getIconUrl(appDir.toLowerCase(), registryId),
       port,
       registry: registryId,
       author: casaos.author || '',
