@@ -1,203 +1,50 @@
 /**
  * Apps API - Browse and manage apps from Umbrel App Stores
+ *
+ * Note: Umbrel routes have special behavior:
+ * - Legacy icon path fallback for backward compatibility
+ * - Categories endpoint
+ * - Apps at root path (/) instead of /apps
+ * - GET /sync for backward compatibility
  */
 
 import { Router } from 'express';
-import { existsSync } from 'fs';
-import { join } from 'path';
-import { randomUUID } from 'crypto';
 import { requireAuth } from '../middleware/auth.js';
-import { validateParams, validateQuery, validateBody } from '../middleware/validate.js';
-import { Errors } from '../middleware/error.js';
+import { validateQuery } from '../middleware/validate.js';
 import { appStoreService } from '../../services/appStoreService.js';
-import { config } from '../../config.js';
 import { z } from 'zod';
-import { proxyImage, getGalleryUrls } from '../utils/imageProxy.js';
-import { broadcastSyncProgress, broadcastSyncComplete } from '../../websocket/broadcast.js';
+import {
+  createIconRoutes,
+  createRegistryRoutes,
+  createAppRoutes,
+  buildSyncMessage,
+} from './storeRouteFactory.js';
 
 const router = Router();
 
-// ==================== Public Icon Routes (no auth) ====================
-const iconRouter = Router();
+// Store configuration for Umbrel
+const umbrelConfig = {
+  storeType: 'umbrel',
+  displayName: 'Umbrel',
+  service: appStoreService,
+  iconExtensions: ['svg', 'png'] as const,
+  legacyIconPath: true,
+};
 
-// GET /api/apps/:registry/:id/icon - Get app icon (registry-specific)
-iconRouter.get('/:registry/:id/icon', validateParams(z.object({
-  registry: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/),
-  id: z.string().min(1).max(100)
-})), (req, res, next) => {
-  try {
-    const { registry, id } = req.params;
-    const svgPath = join(config.paths.icons, 'umbrel', registry, `${id}.svg`);
-    const pngPath = join(config.paths.icons, 'umbrel', registry, `${id}.png`);
+// Create icon routes with legacy path support
+const iconRouter = createIconRoutes(umbrelConfig);
 
-    if (existsSync(svgPath)) {
-      res.setHeader('Content-Type', 'image/svg+xml');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.sendFile(svgPath);
-      return;
-    }
+// Add registry management routes
+router.use(createRegistryRoutes(umbrelConfig));
 
-    if (existsSync(pngPath)) {
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.sendFile(pngPath);
-      return;
-    }
-
-    // Fall back to old icon location for backward compatibility
-    const oldIconPath = join(config.paths.icons, `${id}.svg`);
-    if (existsSync(oldIconPath)) {
-      res.setHeader('Content-Type', 'image/svg+xml');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.sendFile(oldIconPath);
-      return;
-    }
-
-    res.status(404).end();
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/apps/:id/gallery/:index - Proxy gallery images to avoid CORS issues
-iconRouter.get('/:id/gallery/:index', validateParams(z.object({
-  id: z.string().min(1).max(100),
-  index: z.string().regex(/^\d+$/),
-})), async (req, res, next) => {
-  try {
-    const { id, index } = req.params;
-    const app = await appStoreService.getApp(id);
-
-    if (!app) {
-      res.status(404).end();
-      return;
-    }
-
-    const gallery = getGalleryUrls(app as unknown as Record<string, unknown>);
-    const idx = parseInt(index, 10);
-
-    if (idx < 0 || idx >= gallery.length) {
-      res.status(404).end();
-      return;
-    }
-
-    await proxyImage(gallery[idx], res);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/apps/:id/icon - Legacy icon route
-iconRouter.get('/:id/icon', validateParams(z.object({ id: z.string().min(1).max(100) })), async (req, res, next) => {
-  try {
-    const id = req.params.id;
-
-    // Try old location first for backward compatibility
-    const oldIconPath = join(config.paths.icons, `${id}.svg`);
-    if (existsSync(oldIconPath)) {
-      res.setHeader('Content-Type', 'image/svg+xml');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.sendFile(oldIconPath);
-      return;
-    }
-
-    // Try registry-specific locations
-    const registries = await appStoreService.getRegistries();
-    for (const registry of registries) {
-      const svgPath = join(config.paths.icons, 'umbrel', registry.id, `${id}.svg`);
-      if (existsSync(svgPath)) {
-        res.setHeader('Content-Type', 'image/svg+xml');
-        res.setHeader('Cache-Control', 'public, max-age=86400');
-        res.sendFile(svgPath);
-        return;
-      }
-    }
-
-    res.status(404).end();
-  } catch (err) {
-    next(err);
-  }
-});
+// ==================== Umbrel-Specific Routes ====================
 
 // Query schema for apps list
 const appsQuerySchema = z.object({
   category: z.string().min(1).max(50).optional(),
 });
 
-// ==================== Registry Management ====================
-
-// GET /api/apps/registries - List all registries
-router.get('/registries', requireAuth, async (req, res, next) => {
-  try {
-    const registries = await appStoreService.getRegistries();
-    res.json({ registries });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /api/apps/registries - Add a new registry
-router.post('/registries', requireAuth, validateBody(z.object({
-  id: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'ID must be lowercase alphanumeric with hyphens'),
-  name: z.string().min(1).max(100),
-  url: z.string().url(),
-})), async (req, res, next) => {
-  try {
-    const { id, name, url } = req.body;
-    const registry = await appStoreService.addRegistry(id, name, url);
-    res.status(201).json(registry);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('already exists')) {
-      res.status(409).json({ error: { code: 'DUPLICATE_REGISTRY', message: err.message } });
-      return;
-    }
-    next(err);
-  }
-});
-
-// PUT /api/apps/registries/:id - Update a registry
-router.put('/registries/:id', requireAuth, validateParams(z.object({
-  id: z.string().min(1).max(50),
-})), validateBody(z.object({
-  name: z.string().min(1).max(100).optional(),
-  url: z.string().url().optional(),
-  enabled: z.boolean().optional(),
-}).refine(data => data.name || data.url || data.enabled !== undefined, {
-  message: 'At least one field must be provided',
-})), async (req, res, next) => {
-  try {
-    const registry = await appStoreService.updateRegistry(req.params.id, req.body);
-    if (!registry) {
-      throw Errors.notFound('Registry', req.params.id);
-    }
-    res.json(registry);
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('already exists')) {
-      res.status(409).json({ error: { code: 'DUPLICATE_REGISTRY', message: err.message } });
-      return;
-    }
-    next(err);
-  }
-});
-
-// DELETE /api/apps/registries/:id - Remove a registry
-router.delete('/registries/:id', requireAuth, validateParams(z.object({
-  id: z.string().min(1).max(50),
-})), async (req, res, next) => {
-  try {
-    const deleted = await appStoreService.removeRegistry(req.params.id);
-    if (!deleted) {
-      throw Errors.notFound('Registry', req.params.id);
-    }
-    res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ==================== App Management ====================
-
-// GET /api/apps - List available apps
+// GET / - List available apps (with optional category filter)
 router.get('/', requireAuth, validateQuery(appsQuerySchema), async (req, res, next) => {
   try {
     const category = req.query.category as string | undefined;
@@ -214,7 +61,7 @@ router.get('/', requireAuth, validateQuery(appsQuerySchema), async (req, res, ne
   }
 });
 
-// GET /api/apps/categories - Get all categories with counts
+// GET /categories - Get all categories with counts (Umbrel-specific)
 router.get('/categories', requireAuth, async (req, res, next) => {
   try {
     const categories = await appStoreService.getCategories();
@@ -224,126 +71,21 @@ router.get('/categories', requireAuth, async (req, res, next) => {
   }
 });
 
-// POST /api/apps/sync - Sync apps from Umbrel registries
-router.post('/sync', requireAuth, async (req, res, next) => {
-  try {
-    const registryId = req.query.registry as string | undefined;
+// Add standard app routes (sync, status, get by id) at root path
+// Note: createAppRoutes adds routes at '' path since Umbrel uses root
+router.use(createAppRoutes({ ...umbrelConfig, storeType: 'umbrel' }, ''));
 
-    if (registryId) {
-      const registry = await appStoreService.getRegistry(registryId);
-      if (!registry) {
-        res.status(400).json({ error: { code: 'INVALID_REGISTRY', message: `Registry not found: ${registryId}` } });
-        return;
-      }
-    }
-
-    const syncId = randomUUID();
-    const startTime = Date.now();
-
-    const result = await appStoreService.syncApps(registryId, {
-      onProgress: (data) => {
-        broadcastSyncProgress({
-          syncId,
-          storeType: 'umbrel',
-          registryId: data.registryId,
-          registryName: data.registryName,
-          phase: data.phase,
-          currentApp: data.currentApp,
-          processed: data.processed,
-          total: data.total,
-          errors: data.errors,
-        });
-      },
-    });
-
-    const duration = Date.now() - startTime;
-
-    // Broadcast completion
-    let registryName = 'Umbrel';
-    if (registryId) {
-      const registry = await appStoreService.getRegistry(registryId);
-      registryName = registry?.name || registryId;
-    }
-
-    broadcastSyncComplete({
-      syncId,
-      storeType: 'umbrel',
-      registryId: registryId || 'all',
-      registryName,
-      synced: result.synced,
-      updated: result.updated,
-      removed: result.removed,
-      errors: result.errors,
-      duration,
-    });
-
-    const parts = [];
-    if (result.synced > 0) parts.push(`${result.synced} new`);
-    if (result.updated > 0) parts.push(`${result.updated} updated`);
-    if (result.removed > 0) parts.push(`${result.removed} removed`);
-    const summary = parts.length > 0 ? parts.join(', ') : 'No changes';
-
-    res.json({
-      synced: result.synced,
-      updated: result.updated,
-      removed: result.removed,
-      errors: result.errors,
-      registry: registryId || 'all',
-      message: `${registryName}: ${summary}${result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''}`,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/apps/sync - Also support GET for sync (backward compatibility)
+// GET /sync - Legacy GET endpoint for backward compatibility
 router.get('/sync', requireAuth, async (req, res, next) => {
   try {
     const result = await appStoreService.syncApps();
-
-    const parts = [];
-    if (result.synced > 0) parts.push(`${result.synced} new`);
-    if (result.updated > 0) parts.push(`${result.updated} updated`);
-    if (result.removed > 0) parts.push(`${result.removed} removed`);
-    const summary = parts.length > 0 ? parts.join(', ') : 'No changes';
-
     res.json({
       synced: result.synced,
       updated: result.updated,
       removed: result.removed,
       errors: result.errors,
-      message: `${summary}${result.errors.length > 0 ? ` (${result.errors.length} errors)` : ''}`,
+      message: buildSyncMessage('Umbrel', result),
     });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/apps/status - Get sync status
-router.get('/status', requireAuth, async (req, res, next) => {
-  try {
-    const needsSync = await appStoreService.needsSync();
-    const appCount = await appStoreService.getAppCount();
-
-    res.json({
-      needsSync,
-      appCount,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// GET /api/apps/:id - Get specific app details
-router.get('/:id', requireAuth, validateParams(z.object({ id: z.string().min(1).max(100) })), async (req, res, next) => {
-  try {
-    const app = await appStoreService.getApp(req.params.id);
-
-    if (!app) {
-      throw Errors.notFound('App', req.params.id);
-    }
-
-    res.json(app);
   } catch (err) {
     next(err);
   }
