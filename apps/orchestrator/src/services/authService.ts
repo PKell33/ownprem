@@ -5,6 +5,7 @@ import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
 import { getDb } from '../db/index.js';
 import { UserRow, GroupRow, UserGroupRow, RefreshTokenRow } from '../db/types.js';
+import { update } from '../db/queryBuilder.js';
 import { config } from '../config.js';
 import { authLogger } from '../lib/logger.js';
 
@@ -402,24 +403,19 @@ class AuthService {
       }
     }
 
-    const setClauses: string[] = ['updated_at = CURRENT_TIMESTAMP'];
-    const values: (string | number)[] = [];
+    // Build UPDATE using UpdateBuilder
+    const { setClause, params, hasUpdates } = update()
+      .set('name', updates.name)
+      .set('description', updates.description)
+      .set('totp_required', updates.totpRequired !== undefined ? (updates.totpRequired ? 1 : 0) : undefined)
+      .setRaw('updated_at', 'CURRENT_TIMESTAMP')
+      .build();
 
-    if (updates.name !== undefined) {
-      setClauses.push('name = ?');
-      values.push(updates.name);
-    }
-    if (updates.description !== undefined) {
-      setClauses.push('description = ?');
-      values.push(updates.description);
-    }
-    if (updates.totpRequired !== undefined) {
-      setClauses.push('totp_required = ?');
-      values.push(updates.totpRequired ? 1 : 0);
+    if (!hasUpdates) {
+      return true; // No updates needed
     }
 
-    values.push(groupId);
-    db.prepare(`UPDATE groups SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+    db.prepare(`UPDATE groups SET ${setClause} WHERE id = ?`).run(...params, groupId);
     return true;
   }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { getDb } from '../db/index.js';
 import { CertificateRow } from '../db/types.js';
+import { filter } from '../db/queryBuilder.js';
 import { secretsManager } from './secretsManager.js';
 import logger from '../lib/logger.js';
 
@@ -265,28 +266,23 @@ class CertificateAuthorityService {
     expiringWithinDays?: number;
   }): Promise<CertificateInfo[]> {
     const db = getDb();
-    const conditions: string[] = [];
-    const params: unknown[] = [];
 
-    if (filters?.type) {
-      conditions.push('type = ?');
-      params.push(filters.type);
-    }
-    if (filters?.issuedToServerId) {
-      conditions.push('issued_to_server_id = ?');
-      params.push(filters.issuedToServerId);
-    }
-    if (!filters?.includeRevoked) {
-      conditions.push('revoked_at IS NULL');
-    }
+    // Calculate expiry date if filtering by days
+    let expiryDate: string | undefined;
     if (filters?.expiringWithinDays) {
-      const expiryDate = new Date();
-      expiryDate.setDate(expiryDate.getDate() + filters.expiringWithinDays);
-      conditions.push('not_after <= ?');
-      params.push(expiryDate.toISOString());
+      const date = new Date();
+      date.setDate(date.getDate() + filters.expiringWithinDays);
+      expiryDate = date.toISOString();
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    // Build filter using FilterBuilder
+    const { whereClause, params } = filter()
+      .equals('type', filters?.type)
+      .equals('issued_to_server_id', filters?.issuedToServerId)
+      .isNull('revoked_at', !filters?.includeRevoked)
+      .compare('not_after', '<=', expiryDate)
+      .build();
+
     const rows = db.prepare(`SELECT * FROM certificates ${whereClause} ORDER BY not_after ASC`)
       .all(...params) as CertificateRow[];
 

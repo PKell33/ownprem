@@ -1,18 +1,12 @@
 import { randomBytes, createHash } from 'crypto';
 import { randomUUID } from 'crypto';
 import { getDb } from '../db/index.js';
-import { AgentTokenRow } from '../db/types.js';
+import { AgentTokenRow, AgentToken, rowToAgentToken } from '../db/types.js';
 import { auditService } from './auditService.js';
 import logger from '../lib/logger.js';
 
-export interface AgentToken {
-  id: string;
-  serverId: string;
-  name: string | null;
-  expiresAt: Date | null;
-  createdAt: Date;
-  lastUsedAt: Date | null;
-}
+// Re-export for backwards compatibility
+export type { AgentToken } from '../db/types.js';
 
 /**
  * Hash a token for storage using SHA-256.
@@ -124,7 +118,7 @@ class AgentTokenService {
       ORDER BY created_at DESC
     `).all(serverId) as AgentTokenRow[];
 
-    return rows.map(row => this.rowToToken(row));
+    return rows.map(row => rowToAgentToken(row));
   }
 
   /**
@@ -139,7 +133,7 @@ class AgentTokenService {
       WHERE id = ?
     `).get(tokenId) as AgentTokenRow | undefined;
 
-    return row ? this.rowToToken(row) : null;
+    return row ? rowToAgentToken(row) : null;
   }
 
   /**
@@ -255,17 +249,6 @@ class AgentTokenService {
     }
 
     return result.changes;
-  }
-
-  private rowToToken(row: AgentTokenRow): AgentToken {
-    return {
-      id: row.id,
-      serverId: row.server_id,
-      name: row.name,
-      expiresAt: row.expires_at ? new Date(row.expires_at) : null,
-      createdAt: new Date(row.created_at),
-      lastUsedAt: row.last_used_at ? new Date(row.last_used_at) : null,
-    };
   }
 }
 

@@ -13,6 +13,7 @@ import { join } from 'path';
 import { pipeline } from 'stream/promises';
 import { Extract } from 'unzipper';
 import { getDb } from '../db/index.js';
+import { update } from '../db/queryBuilder.js';
 import logger from '../lib/logger.js';
 import { config } from '../config.js';
 
@@ -344,14 +345,7 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
     const existing = await this.getRegistry(id);
     if (!existing) return null;
 
-    const fields: string[] = [];
-    const values: (string | number)[] = [];
-
-    if (updates.name !== undefined) {
-      fields.push('name = ?');
-      values.push(updates.name);
-    }
-
+    // Check for duplicate URL if updating
     if (updates.url !== undefined) {
       this.validateRegistryUrl(updates.url);
 
@@ -361,24 +355,22 @@ export abstract class BaseStoreService<TApp extends BaseAppDefinition> {
       if (duplicate) {
         throw new Error('A registry with this URL already exists');
       }
-
-      fields.push('url = ?');
-      values.push(updates.url);
     }
 
-    if (updates.enabled !== undefined) {
-      fields.push('enabled = ?');
-      values.push(updates.enabled ? 1 : 0);
-    }
+    // Build UPDATE using UpdateBuilder
+    const { setClause, params, hasUpdates } = update()
+      .set('name', updates.name)
+      .set('url', updates.url)
+      .set('enabled', updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : undefined)
+      .build();
 
-    if (fields.length === 0) {
+    if (!hasUpdates) {
       return existing;
     }
 
-    values.push(id, this.storeName);
     db.prepare(
-      `UPDATE ${REGISTRIES_TABLE} SET ${fields.join(', ')} WHERE id = ? AND store_type = ?`
-    ).run(...values);
+      `UPDATE ${REGISTRIES_TABLE} SET ${setClause} WHERE id = ? AND store_type = ?`
+    ).run(...params, id, this.storeName);
 
     this.log.info({ store: this.storeName, id, updates }, 'Updated registry');
 

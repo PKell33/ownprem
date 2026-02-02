@@ -272,6 +272,32 @@ export interface AuditLogRow {
   timestamp: string;
 }
 
+export interface AuditLog {
+  id: string;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  userId: string | null;
+  username: string | null;
+  details: Record<string, unknown> | null;
+  ipAddress: string | null;
+  createdAt: Date;
+}
+
+export function rowToAuditLog(row: AuditLogRow): AuditLog {
+  return {
+    id: row.id,
+    action: row.action,
+    resourceType: row.resource_type,
+    resourceId: row.resource_id,
+    userId: row.user_id,
+    username: row.username,
+    details: row.details ? JSON.parse(row.details) : null,
+    ipAddress: row.ip_address,
+    createdAt: new Date(row.timestamp),
+  };
+}
+
 // ==================== Agent Token Types ====================
 
 export interface AgentTokenRow {
@@ -282,6 +308,26 @@ export interface AgentTokenRow {
   created_at: string;
   last_used_at: string | null;
   expires_at: string | null;
+}
+
+export interface AgentToken {
+  id: string;
+  serverId: string;
+  name: string | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  lastUsedAt: Date | null;
+}
+
+export function rowToAgentToken(row: AgentTokenRow): AgentToken {
+  return {
+    id: row.id,
+    serverId: row.server_id,
+    name: row.name,
+    expiresAt: row.expires_at ? new Date(row.expires_at) : null,
+    createdAt: new Date(row.created_at),
+    lastUsedAt: row.last_used_at ? new Date(row.last_used_at) : null,
+  };
 }
 
 // ==================== Certificate Types ====================
