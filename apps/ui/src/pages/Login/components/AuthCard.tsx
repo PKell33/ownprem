@@ -17,15 +17,15 @@ interface AuthCardProps {
  * Starts in splash mode with logo + login button, then reveals the card.
  */
 export default function AuthCard({ children, tagline, error, showCard, onShowCard }: AuthCardProps) {
-  const oRef = useRef<HTMLSpanElement>(null);
+  const logoRef = useRef<HTMLDivElement>(null);
   const [origin, setOrigin] = useState<{ x: number; y: number } | undefined>();
   const [showButton, setShowButton] = useState(false);
 
-  // Get the position of the "O" character for node origin
+  // Get the center of the logo for node origin
   useEffect(() => {
     const updateOrigin = () => {
-      if (oRef.current) {
-        const rect = oRef.current.getBoundingClientRect();
+      if (logoRef.current) {
+        const rect = logoRef.current.getBoundingClientRect();
         setOrigin({
           x: rect.left + rect.width / 2,
           y: rect.top + rect.height / 2,
@@ -66,13 +66,14 @@ export default function AuthCard({ children, tagline, error, showCard, onShowCar
           {/* Large centered logo */}
           <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-10">
             <div
+              ref={logoRef}
               className="text-8xl md:text-9xl font-bold tracking-tight"
               style={{
                 color: '#c0caf5',
                 textShadow: '0 0 30px rgba(122, 162, 247, 0.5), 0 0 60px rgba(122, 162, 247, 0.3)',
               }}
             >
-              <span ref={oRef} style={{ fontFamily: 'system-ui' }}>&#x232C;</span>
+              <span style={{ fontFamily: 'system-ui' }}>&#x232C;</span>
               <span style={{ color: '#7aa2f7' }}>w</span>
               <span>nPrem</span>
             </div>
